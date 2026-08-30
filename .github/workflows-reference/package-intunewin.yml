@@ -753,7 +753,14 @@ jobs:
           . "$env:GITHUB_WORKSPACE\Send-ErrorCallback.ps1"
           . "$env:GITHUB_WORKSPACE\Invoke-DownloadWithRetry.ps1"
           . "$env:GITHUB_WORKSPACE\Resolve-InstallerFileName.ps1"
-          . "$env:GITHUB_WORKSPACE\intuneget\qa\host\IntuneQA.PackageDependencyPolicy.ps1"
+          $dependencyPolicyScript = "$env:GITHUB_WORKSPACE\intuneget\qa\host\IntuneQA.PackageDependencyPolicy.ps1"
+          if (Test-Path -LiteralPath $dependencyPolicyScript) {
+            . $dependencyPolicyScript
+          } elseif ($env:PACKAGE_DEPENDENCIES -and $env:PACKAGE_DEPENDENCIES -ne '[]') {
+            throw "Package dependencies were requested but IntuneQA.PackageDependencyPolicy.ps1 is not available in this checkout"
+          } else {
+            function Assert-IntuneQAPackageDependencyPolicy { param($Dependency, $ErrorPrefix) }
+          }
 
           try {
           Send-Callback -Body @{
