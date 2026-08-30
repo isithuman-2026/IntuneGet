@@ -451,7 +451,80 @@ docker-compose up -d
 2. Verify `GITHUB_WORKFLOWS_REPO` is configured and contains the packaging workflow
 3. Verify `CALLBACK_SECRET` matches in both places
 
+### "Client secrets are blocked by a tenant-wide policy"
+
+Some tenants (especially ones hardened per CA/Entra security baselines) have a
+tenant-wide **application management policy** blocking new client secrets.
+This is a different feature from Conditional Access and lives in a
+non-obvious spot in the Entra admin center:
+
+1. **Entra admin center** > **Entra ID** > **Enterprise apps** > **Application policies**
+2. Find **Block password addition** — if it's **On** and applies to all
+   applications, that's what's blocking you
+3. Change "Applies to" to **All applications with exclusions**
+4. **Add excluded callers** and add this app — add it as **both** the
+   *app registration* object and the *enterprise application* (service
+   principal) object; the policy engine checks both, and the portal lists
+   them as separate selectable entries even though they're the same app
+5. Save, then retry creating the client secret
+
+### `database: false` in the health check, `/data` stays empty (SQLite mode)
+
+Two separate causes, both silent (no error in `docker-compose logs`, the
+exception is caught and just flips the health flag):
+
+1. **`DATABASE_PATH` mismatch.** It defaults to `./data/intuneget.db`, which
+   resolves relative to the container's `WORKDIR` (`/app`) — i.e.
+   `/app/data/intuneget.db`. If your `docker-compose.yml` mounts a volume at
+   `/data` (not `/app/data`), the app is opening a SQLite file in a directory
+   that was never created and was never your persistent volume. Fix: set
+   `DATABASE_PATH=/data/intuneget.db` explicitly so it matches wherever you
+   actually mounted the volume.
+2. **Docker userns-remap + volume ownership.** If your Docker daemon runs
+   with `userns-remap` enabled (common in hardened homelab setups), any
+   compose service that mounts a host path needs `userns_mode: "host"` or the
+   remapped UID inside the container won't match the host directory's owner
+   and writes fail with `EACCES`. Even with `userns_mode: "host"` set, the
+   host directory's ownership must still match the *container's runtime
+   user* (this image runs as `nextjs`, uid `1001`) — a directory created by
+   `docker compose` defaults to a different owner (often uid `1000`) and
+   needs `chown 1001:1001 <your-data-dir>` on the host before the container
+   can write to it.
+
+Verify with: `docker exec <container> sh -c "id; touch /data/testwrite"` —
+if that fails with permission denied, it's the ownership issue above, not a
+config problem in `.env`.
+
+### Docker healthcheck reports unhealthy / reverse proxy 404s despite app running
+
+Don't point the Docker `healthcheck` at `/api/health` — that endpoint is a
+*readiness* check and correctly returns `503` until Entra AD and pipeline
+config are fully filled in, which is expected during initial setup. Using it
+as the container healthcheck makes reverse proxies (Traefik, etc.) that
+exclude unhealthy containers from their pool return 404s for what is actually
+a perfectly running container. Point the healthcheck at the root path
+instead (a liveness check, not readiness):
+
+```yaml
+healthcheck:
+  test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:3000/"]
+```
+
+Also use `127.0.0.1`, not `localhost` — inside some minimal container images
+`localhost` resolves to `::1` (IPv6) first, but Next.js binds IPv4 only by
+default, so the healthcheck fails with "connection refused" regardless of
+whether the app is actually up.
+
+### "New Client Secret" — Secret ID vs Value
+
+The Azure portal shows two fields after creating a client secret: **Secret
+ID** (a GUID identifying the credential object — not a credential itself,
+used only for portal/admin reference) and **Value** (the actual secret).
+Only **Value** goes into `AZURE_AD_CLIENT_SECRET` — copy it immediately, it's
+not shown again after you navigate away.
+
 ## Support
 
-- GitHub Issues: [github.com/ugurkocde/IntuneGet/issues](https://github.com/ugurkocde/IntuneGet/issues)
-- Documentation: [github.com/ugurkocde/IntuneGet/docs](https://github.com/ugurkocde/IntuneGet/tree/main/docs)
+- GitHub Issues: [github.com/isithuman-2026/IntuneGet/issues](https://github.com/isithuman-2026/IntuneGet/issues)
+- Documentation: [github.com/isithuman-2026/IntuneGet/tree/main/docs](https://github.com/isithuman-2026/IntuneGet/tree/main/docs)
+- Upstream project: [github.com/ugurkocde/IntuneGet](https://github.com/ugurkocde/IntuneGet)
