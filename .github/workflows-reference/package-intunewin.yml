@@ -753,7 +753,7 @@ jobs:
           . "$env:GITHUB_WORKSPACE\Send-ErrorCallback.ps1"
           . "$env:GITHUB_WORKSPACE\Invoke-DownloadWithRetry.ps1"
           . "$env:GITHUB_WORKSPACE\Resolve-InstallerFileName.ps1"
-          . "$env:GITHUB_WORKSPACE\qa\host\IntuneQA.PackageDependencyPolicy.ps1"
+          . "$env:GITHUB_WORKSPACE\intuneget\qa\host\IntuneQA.PackageDependencyPolicy.ps1"
 
           try {
           Send-Callback -Body @{
