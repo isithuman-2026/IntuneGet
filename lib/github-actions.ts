@@ -10,6 +10,7 @@ import { applyInstallerUrlOverride } from './installer-url-overrides';
 import { reconcileCatalogInstaller } from './catalog-installer-reconciliation';
 import { enforceInstallerPreflight, InstallerPreflightError } from './installer-preflight';
 import { enforceQaGate } from './qa/gate';
+import { isSupabaseServerConfigured } from './supabase';
 import {
   resolveApplicationInstallerSuccessCodes,
   resolveApplicationUninstallCommand,
@@ -268,16 +269,21 @@ export async function triggerPackagingWorkflow(
     : '';
   const calculatedPackageProfileSha256 = normalizedPackageInput?.identity.packageProfileSha256;
   const packageProfileSha256 = calculatedPackageProfileSha256;
-  await enforceQaGate({
-    wingetId: inputs.wingetId,
-    version: inputs.version,
-    architecture: inputs.architecture,
-    installerSha256: inputs.installerSha256,
-    packageProfileSha256,
-    requirePassed: options?.requireQaPass,
-    qaOverride: inputs.qaOverride,
-    sourceType: inputs.sourceType,
-  });
+  // QA history (VirusTotal verdicts, prior test outcomes) is Supabase-backed
+  // telemetry with no SQLite equivalent — self-hosted installs without
+  // Supabase have no QA pipeline to gate against, so skip it entirely.
+  if (isSupabaseServerConfigured()) {
+    await enforceQaGate({
+      wingetId: inputs.wingetId,
+      version: inputs.version,
+      architecture: inputs.architecture,
+      installerSha256: inputs.installerSha256,
+      packageProfileSha256,
+      requirePassed: options?.requireQaPass,
+      qaOverride: inputs.qaOverride,
+      sourceType: inputs.sourceType,
+    });
+  }
 
   // Record time before triggering to help find the run
   const triggerTime = new Date();
