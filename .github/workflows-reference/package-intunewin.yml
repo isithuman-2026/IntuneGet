@@ -113,6 +113,12 @@ jobs:
               "Content-Type" = "application/json"
               "X-Signature" = $signature
             }
+            # Optional Cloudflare Access Service Token, for callback URLs
+            # narrowed behind a Cloudflare Tunnel + Access application.
+            if ($env:CF_ACCESS_CLIENT_ID -and $env:CF_ACCESS_CLIENT_SECRET) {
+              $headers["CF-Access-Client-Id"] = $env:CF_ACCESS_CLIENT_ID
+              $headers["CF-Access-Client-Secret"] = $env:CF_ACCESS_CLIENT_SECRET
+            }
 
             $attempt = 0
             $success = $false
@@ -634,6 +640,8 @@ jobs:
       - name: Send initial status callback
         env:
           CALLBACK_SECRET: ${{ secrets.CALLBACK_SECRET }}
+          CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+          CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
         run: |
           Write-Host "::add-mask::$env:TENANT_ID"
           Write-Host "========================================"
@@ -664,6 +672,8 @@ jobs:
       - name: Download tools
         env:
           CALLBACK_SECRET: ${{ secrets.CALLBACK_SECRET }}
+          CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+          CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
           TOOLS_CACHE_HIT: ${{ steps.tools-cache.outputs.cache-hit }}
         run: |
           . "$env:GITHUB_WORKSPACE\Send-Callback.ps1"
@@ -748,6 +758,8 @@ jobs:
       - name: Download and verify installer
         env:
           CALLBACK_SECRET: ${{ secrets.CALLBACK_SECRET }}
+          CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+          CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
         run: |
           . "$env:GITHUB_WORKSPACE\Send-Callback.ps1"
           . "$env:GITHUB_WORKSPACE\Send-ErrorCallback.ps1"
@@ -1165,6 +1177,8 @@ jobs:
       - name: Create PSADT package
         env:
           CALLBACK_SECRET: ${{ secrets.CALLBACK_SECRET }}
+          CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+          CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
           INPUT_JOB_ID: ${{ github.event.client_payload.job.jobId }}
           INPUT_CALLBACK_URL: ${{ github.event.client_payload.job.callbackUrl }}
           INPUT_SILENT_SWITCHES: ${{ github.event.client_payload.installer.silentSwitches }}
@@ -1186,6 +1200,8 @@ jobs:
       - name: Create IntuneWin package
         env:
           CALLBACK_SECRET: ${{ secrets.CALLBACK_SECRET }}
+          CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+          CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
         run: |
           . "$env:GITHUB_WORKSPACE\Send-Callback.ps1"
           . "$env:GITHUB_WORKSPACE\Send-ErrorCallback.ps1"
@@ -1305,6 +1321,8 @@ jobs:
         env:
           AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
           CALLBACK_SECRET: ${{ secrets.CALLBACK_SECRET }}
+          CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+          CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
         run: |
           . "$env:GITHUB_WORKSPACE\Send-ErrorCallback.ps1"
           . "$env:GITHUB_WORKSPACE\Get-GraphToken.ps1"
@@ -1350,6 +1368,8 @@ jobs:
       - name: Check for duplicate app
         env:
           CALLBACK_SECRET: ${{ secrets.CALLBACK_SECRET }}
+          CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+          CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
           AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
           INPUT_DISPLAY_NAME: ${{ github.event.client_payload.app.displayName }}
           INPUT_WINGET_ID: ${{ github.event.client_payload.app.wingetId }}
@@ -1399,6 +1419,8 @@ jobs:
         if: env.DUPLICATE_FOUND != 'true'
         env:
           CALLBACK_SECRET: ${{ secrets.CALLBACK_SECRET }}
+          CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+          CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
           AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
         run: |
           . "$env:GITHUB_WORKSPACE\Send-Callback.ps1"
@@ -2278,6 +2300,8 @@ jobs:
         if: success() && env.DUPLICATE_FOUND != 'true'
         env:
           CALLBACK_SECRET: ${{ secrets.CALLBACK_SECRET }}
+          CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+          CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
           AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
         run: |
           . "$env:GITHUB_WORKSPACE\Send-Callback.ps1"
@@ -2508,6 +2532,8 @@ jobs:
         if: success() && env.DUPLICATE_FOUND != 'true'
         env:
           CALLBACK_SECRET: ${{ secrets.CALLBACK_SECRET }}
+          CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+          CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
           AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
         run: |
           $categoriesJson = $env:CATEGORIES
@@ -2565,6 +2591,8 @@ jobs:
         if: success() && env.DUPLICATE_FOUND != 'true'
         env:
           CALLBACK_SECRET: ${{ secrets.CALLBACK_SECRET }}
+          CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+          CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
           AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
         run: |
           $espJson = $env:ESP_PROFILES
@@ -2653,6 +2681,8 @@ jobs:
         if: success() && env.DUPLICATE_FOUND != 'true'
         env:
           CALLBACK_SECRET: ${{ secrets.CALLBACK_SECRET }}
+          CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+          CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
           AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
         run: |
           $relationshipsJson = $env:RELATIONSHIPS
@@ -2768,6 +2798,8 @@ jobs:
         if: success() && env.DUPLICATE_FOUND != 'true'
         env:
           CALLBACK_SECRET: ${{ secrets.CALLBACK_SECRET }}
+          CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+          CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
         run: |
           . "$env:GITHUB_WORKSPACE\Send-Callback.ps1"
           $callbackBody = @{
@@ -2835,6 +2867,8 @@ jobs:
         if: failure()
         env:
           CALLBACK_SECRET: ${{ secrets.CALLBACK_SECRET }}
+          CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+          CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
         run: |
           # Only send fallback error if a specific error callback wasn't already sent
           if ($env:ERROR_SENT -ne "true") {

@@ -518,9 +518,12 @@ export async function POST(request: NextRequest) {
           errors.push({ wingetId: item.wingetId, error: 'GitHub Actions packaging service not configured' });
         }
       } else {
-        // Get callback URL from environment (only used in GitHub mode)
+        // Get callback URL from environment (only used in GitHub mode).
+        // CALLBACK_BASE_URL lets self-hosters expose a narrower public
+        // endpoint (e.g. a Cloudflare Tunnel scoped to just this path) for
+        // GitHub Actions to reach, separate from the app's main URL.
         const config2 = getAppConfig();
-        const baseUrl = config2.app.url || (process.env.VERCEL_URL
+        const baseUrl = process.env.CALLBACK_BASE_URL || config2.app.url || (process.env.VERCEL_URL
           ? `https://${process.env.VERCEL_URL}`
           : 'http://localhost:3000');
         const callbackUrl = `${baseUrl}/api/package/callback`;
