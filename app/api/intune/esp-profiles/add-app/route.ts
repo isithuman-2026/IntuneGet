@@ -51,40 +51,40 @@ export async function POST(request: NextRequest) {
     }
 
     const supabase = getServerClientOrNull();
-    if (!supabase) {
-      return NextResponse.json(
-        { error: 'ESP profile updates require Supabase server configuration' },
-        { status: 503 }
-      );
+    let tenantId = user.tenantId;
+
+    if (supabase) {
+      const mspTenantId = request.headers.get('X-MSP-Tenant-Id');
+
+      const tenantResolution = await resolveTargetTenantId({
+        supabase,
+        userId: user.userId,
+        tokenTenantId: user.tenantId,
+        requestedTenantId: mspTenantId,
+      });
+
+      if (tenantResolution.errorResponse) {
+        return tenantResolution.errorResponse;
+      }
+
+      tenantId = tenantResolution.tenantId;
+
+      const { data: consentData, error: consentError } = await supabase
+        .from('tenant_consent')
+        .select('*')
+        .eq('tenant_id', tenantId)
+        .eq('is_active', true)
+        .single();
+
+      if (consentError || !consentData) {
+        return NextResponse.json(
+          { error: 'Admin consent not found. Please complete the admin consent flow.' },
+          { status: 403 }
+        );
+      }
     }
-    const mspTenantId = request.headers.get('X-MSP-Tenant-Id');
-
-    const tenantResolution = await resolveTargetTenantId({
-      supabase,
-      userId: user.userId,
-      tokenTenantId: user.tenantId,
-      requestedTenantId: mspTenantId,
-    });
-
-    if (tenantResolution.errorResponse) {
-      return tenantResolution.errorResponse;
-    }
-
-    const tenantId = tenantResolution.tenantId;
-
-    const { data: consentData, error: consentError } = await supabase
-      .from('tenant_consent')
-      .select('*')
-      .eq('tenant_id', tenantId)
-      .eq('is_active', true)
-      .single();
-
-    if (consentError || !consentData) {
-      return NextResponse.json(
-        { error: 'Admin consent not found. Please complete the admin consent flow.' },
-        { status: 403 }
-      );
-    }
+    // Self-hosted SQLite mode has no `tenant_consent` table to check against;
+    // acquireGraphToken below will fail naturally if consent wasn't granted.
 
     let graphToken: string;
     try {
