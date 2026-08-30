@@ -49,8 +49,18 @@ Add these secrets:
 | Secret Name | Description | How to Get |
 |-------------|-------------|------------|
 | `AZURE_CLIENT_ID` | Azure AD Application ID | From Azure AD app registration |
-| `AZURE_CLIENT_SECRET` | Azure AD Client Secret | From Azure AD app registration |
 | `CALLBACK_SECRET` | Webhook verification secret | Generate with `openssl rand -hex 16` |
+
+The workflow authenticates to Graph via GitHub OIDC (`id-token: write`), not a stored
+client secret. On the same app registration, add a **federated credential**:
+
+1. **Certificates & secrets** > **Federated credentials** > **Add credential**
+2. Scenario: **GitHub Actions deploying Azure resources**
+3. Organization: your GitHub org/user, Repository: your `GITHUB_WORKFLOWS_REPO` name
+4. Entity type: **Branch**, Branch: `master` (or your default branch)
+
+Also add `TENANT_ID` as a secret or repository variable — the workflow reads
+`env:TENANT_ID` to acquire a Graph token alongside `AZURE_CLIENT_ID`.
 
 ### Step 3: Enable Workflows
 
@@ -111,8 +121,8 @@ When triggered, the workflow receives:
 
 | Secret | Purpose |
 |--------|---------|
-| `AZURE_CLIENT_ID` | Authenticate to Intune |
-| `AZURE_CLIENT_SECRET` | Authenticate to Intune |
+| `AZURE_CLIENT_ID` | Authenticate to Intune (via GitHub OIDC federated credential, no client secret) |
+| `TENANT_ID` | Target tenant for the Graph token exchange |
 | `CALLBACK_SECRET` | Sign webhook callbacks |
 
 ## Self-Hosted Runner Setup

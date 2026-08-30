@@ -115,15 +115,25 @@ https://login.microsoftonline.com/contoso.onmicrosoft.com/adminconsent?client_id
 
 ## GitHub Actions Configuration
 
-For the packaging pipeline, you also need to configure secrets in your GitHub repository:
+For the packaging pipeline, the reference workflow (`.github/workflows-reference/package-intunewin.yml`)
+authenticates via GitHub OIDC, not a client secret. In your private `GITHUB_WORKFLOWS_REPO`:
 
-1. Go to your GitHub repository > **Settings** > **Secrets and variables** > **Actions**
-2. Add these repository secrets:
+1. Go to **Settings** > **Secrets and variables** > **Actions**
+2. Add repository secrets:
 
 | Secret Name | Value |
 |-------------|-------|
 | `AZURE_CLIENT_ID` | Same as `NEXT_PUBLIC_AZURE_AD_CLIENT_ID` |
-| `AZURE_CLIENT_SECRET` | Same as `AZURE_AD_CLIENT_SECRET` |
+| `TENANT_ID` | Your Entra tenant ID |
+
+3. On the app registration, add a federated credential (**Certificates & secrets** >
+   **Federated credentials**) trusting `repo:<owner>/<GITHUB_WORKFLOWS_REPO>:ref:refs/heads/<branch>`
+   — this replaces the client secret for the workflow's Graph calls. See
+   [GITHUB_ACTIONS_SETUP.md](./GITHUB_ACTIONS_SETUP.md) for full steps.
+
+The client secret created above is still required for the **web app itself**
+(`AZURE_AD_CLIENT_SECRET` / `AZURE_CLIENT_SECRET`) — it is a separate credential
+from the workflow's federated identity.
 
 ## Security Recommendations
 
