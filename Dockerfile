@@ -45,6 +45,12 @@ COPY --from=builder /app/public ./public
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 
+# .next/cache isn't part of the standalone output but Next writes its
+# incremental/prerender cache there at runtime. userns-remap makes a plain
+# chown to nextjs unreliable here, so make it world-writable instead --
+# it's a throwaway cache dir, only the nextjs process runs in this container.
+RUN mkdir -p ./.next/cache && chmod -R 777 ./.next/cache
+
 # Copy Supabase migrations (for reference)
 COPY --from=builder /app/supabase ./supabase
 
