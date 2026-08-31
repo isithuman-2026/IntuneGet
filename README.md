@@ -35,6 +35,18 @@ Skip the manual packaging workflow and deploy Winget apps to Intune in seconds.
 
 ---
 
+## This fork
+
+Self-hosted lab pilot on a home server (node1), tracking a few divergences from upstream to run without Supabase:
+
+- **SQLite mode** (`DATABASE_MODE=sqlite`) — no Supabase dependency. Several routes that unconditionally called the Supabase client now guard on `isSupabaseServerConfigured()` first (packaging job cancel/dismiss, ESP profile listing, the QA gate). One route (`claim`, for the "Discovered Apps" unmanaged-app claim flow) still has no SQLite equivalent at all — that's the one open gap.
+- **Narrow Cloudflare Tunnel callback path** — the self-hosted app has no public DNS record, so the GitHub Actions packaging workflow can't reach its status callback directly. A path-scoped Cloudflare Tunnel + Access Service Token exposes only `/api/package/callback`, nothing else.
+- A handful of other real bugs found and fixed running this in SQLite mode against a live tenant: a SQLite `INSERT` column-count mismatch, a QA-gate dispatch script path referenced in the packaging workflow that never actually existed upstream, and others.
+
+Full running log of every bug, fix, and infra decision (exact IDs, error text, dates) is kept externally for posterity — ask the maintainer of this fork if you want the detail behind any of the above.
+
+---
+
 ## Features
 
 ### For IT Admins
