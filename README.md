@@ -43,7 +43,7 @@ Self-hosted lab pilot on a home server (node1), tracking a few divergences from 
 - **Narrow Cloudflare Tunnel callback path** — the self-hosted app has no public DNS record, so the GitHub Actions packaging workflow can't reach its status callback directly. A path-scoped Cloudflare Tunnel + Access Service Token exposes only `/api/package/callback`, nothing else.
 - A handful of other real bugs found and fixed running this in SQLite mode against a live tenant: a SQLite `INSERT` column-count mismatch, a QA-gate dispatch script path referenced in the packaging workflow that never actually existed upstream, and others.
 
-Full running log of every bug, fix, and infra decision (exact IDs, error text, dates) is kept externally for posterity — ask the maintainer of this fork if you want the detail behind any of the above.
+Full running log of every bug, fix, and infra decision (exact IDs, error text, dates) lives in `BUGFIXES.md` at the repo root — gitignored, local to this checkout only.
 
 ---
 
