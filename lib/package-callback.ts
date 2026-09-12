@@ -38,8 +38,11 @@ export const packageCallbackSchema = z.object({
   duplicateInfo: z.object({
     matchType: z.enum(['exact', 'partial']),
     existingAppId: z.string().trim().min(1).max(128),
-    existingVersion: z.string().max(128).optional(),
-    createdAt: z.string().datetime({ offset: true }).optional(),
+    // PowerShell serializes a $null hashtable value as JSON null, not an
+    // absent key - nullable() is required alongside optional() or a Graph
+    // app with no version/createdDateTime set fails validation outright.
+    existingVersion: z.string().max(128).nullable().optional(),
+    createdAt: z.string().datetime({ offset: true }).nullable().optional(),
   }).optional(),
   warnings: z.array(z.string().max(1_000)).max(20).optional(),
   runId: z.union([z.string(), z.number().int().nonnegative()]).optional(),
