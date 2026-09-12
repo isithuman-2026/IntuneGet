@@ -199,7 +199,7 @@ export async function GET(request: Request) {
       success: result.errors.length === 0,
       usersChecked: result.usersChecked,
       updatesFound: result.updatesFound,
-      autoUpdates: { triggered: 0, skipped: 0, failed: 0 }, // wired in Task 8
+      autoUpdates: result.autoUpdates,
       errors: result.errors.length > 0 ? result.errors : undefined,
     });
   }

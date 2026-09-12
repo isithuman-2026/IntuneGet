@@ -2,24 +2,27 @@
  * SQLite-mode auto-update trigger. Mirrors the safety-check logic of
  * AutoUpdateTrigger (lib/auto-update/trigger.ts) - rate limits, cooldowns,
  * prior-deployment check - against sqliteUpdatePolicies/sqliteAutoUpdateHistory
- * instead of Supabase. Packaging-job creation is deliberately stubbed here;
- * it's wired in a later task once the shared SQLite packaging path is
- * confirmed (detection-rules.ts, packaging-adapters.ts, getDatabase().jobs.create).
+ * instead of Supabase. Packaging-job creation reuses the same
+ * getLatestInstallerInfo -> getDatabase().jobs.create -> triggerPackagingWorkflow
+ * path the Supabase-mode app/api/updates/trigger/route.ts already uses.
  */
 import {
   sqliteUpdatePolicies,
   sqliteAutoUpdateHistory,
   type UpdateCheckInsert,
 } from '@/lib/db/sqlite';
+import { getDatabase } from '@/lib/db';
 import { getServicePrincipalToken } from '@/lib/intune/graph-client';
 import {
   AppUpdatePolicy,
+  DeploymentConfig,
   DEFAULT_SAFETY_CONFIG,
   AutoUpdateSafetyConfig,
   classifyUpdateType,
   canAutoUpdate,
 } from '@/types/update-policies';
-import type { TriggerResult, UpdateInfo } from './trigger';
+import { getLatestInstallerInfo, type TriggerResult, type UpdateInfo } from './trigger';
+import type { Json } from '@/types/database';
 
 export class AutoUpdateTriggerSqlite {
   private safetyConfig: AutoUpdateSafetyConfig;
@@ -71,12 +74,75 @@ export class AutoUpdateTriggerSqlite {
     );
 
     try {
-      // Packaging-job creation reuses the same code path the manual
-      // claim -> cart -> deploy flow already uses in SQLite mode today
-      // (detection-rules.ts, packaging-adapters.ts, getDatabase().jobs.create) -
-      // deliberately NOT reimplemented here. A later task wires the actual
-      // call once the exact shared helper is confirmed.
-      throw new Error('NOT_YET_WIRED');
+      const installerResolution = await getLatestInstallerInfo(
+        undefined,
+        updateInfo.wingetId,
+        (policy.deployment_config as DeploymentConfig).architecture,
+        (policy.deployment_config as DeploymentConfig).installScope
+      );
+      if (!installerResolution.ok) {
+        await sqliteUpdatePolicies.incrementFailureCount(policy.id);
+        await sqliteAutoUpdateHistory.updateStatus(historyId, 'failed', {
+          errorMessage: installerResolution.failure.message,
+          completedAt: new Date().toISOString(),
+        });
+        return { success: false, error: installerResolution.failure.message, historyId };
+      }
+      const installerInfo = { ...installerResolution.info, currentVersion: updateInfo.currentVersion };
+
+      const deploymentConfig = policy.deployment_config as DeploymentConfig;
+      const db = getDatabase();
+      const job = await db.jobs.create({
+        user_id: policy.user_id,
+        tenant_id: policy.tenant_id,
+        winget_id: policy.winget_id,
+        version: installerInfo.latestVersion,
+        display_name: deploymentConfig.displayName,
+        publisher: deploymentConfig.publisher,
+        architecture: deploymentConfig.architecture,
+        installer_type: installerInfo.installerType || deploymentConfig.installerType,
+        installer_url: installerInfo.installerUrl,
+        installer_sha256: installerInfo.installerSha256,
+        install_command: deploymentConfig.installCommand,
+        uninstall_command: deploymentConfig.uninstallCommand,
+        install_scope: deploymentConfig.installScope,
+        detection_rules: deploymentConfig.detectionRules as unknown as Json,
+        status: 'queued',
+      });
+
+      await sqliteAutoUpdateHistory.updateStatus(historyId, 'packaging', { packagingJobId: job.id });
+
+      const { isGitHubActionsConfigured, triggerPackagingWorkflow } = await import('@/lib/github-actions');
+      if (isGitHubActionsConfigured()) {
+        const callbackUrl = `${process.env.CALLBACK_BASE_URL || process.env.NEXT_PUBLIC_APP_URL}/api/package/callback`;
+        await triggerPackagingWorkflow({
+          jobId: job.id,
+          tenantId: policy.tenant_id,
+          wingetId: policy.winget_id,
+          displayName: deploymentConfig.displayName,
+          description: `Auto-updated via IntuneGet from Winget: ${policy.winget_id}`,
+          publisher: deploymentConfig.publisher,
+          version: installerInfo.latestVersion,
+          architecture: deploymentConfig.architecture,
+          installerUrl: installerInfo.installerUrl,
+          installerSha256: installerInfo.installerSha256 || '',
+          installerType: installerInfo.installerType || deploymentConfig.installerType,
+          silentSwitches: installerInfo.silentSwitches || '',
+          uninstallCommand: deploymentConfig.uninstallCommand,
+          callbackUrl,
+          detectionRules: JSON.stringify(deploymentConfig.detectionRules),
+          psadtConfig: deploymentConfig.psadtConfig ? JSON.stringify(deploymentConfig.psadtConfig) : undefined,
+          installScope: (deploymentConfig.installScope === 'user' ? 'user' : 'machine') as 'machine' | 'user',
+          forceCreate: deploymentConfig.forceCreateNewApp !== false,
+        });
+      }
+
+      await sqliteUpdatePolicies.update(policy.id, policy.user_id, {
+        last_auto_update_at: new Date().toISOString(),
+        last_auto_update_version: installerInfo.latestVersion,
+      });
+
+      return { success: true, packagingJobId: job.id, historyId };
     } catch (error) {
       await sqliteUpdatePolicies.incrementFailureCount(policy.id);
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';

@@ -923,7 +923,13 @@ export const sqliteUpdatePolicies = {
   async update(
     id: string,
     userId: string,
-    data: Partial<AppUpdatePolicyInput> & { delay_days?: number; is_enabled?: boolean; consecutive_failures?: number }
+    data: Partial<AppUpdatePolicyInput> & {
+      delay_days?: number;
+      is_enabled?: boolean;
+      consecutive_failures?: number;
+      last_auto_update_at?: string;
+      last_auto_update_version?: string;
+    }
   ): Promise<AppUpdatePolicy | null> {
     const database = getDb();
     const sets: string[] = ['updated_at = ?'];
@@ -934,6 +940,8 @@ export const sqliteUpdatePolicies = {
     if (data.deployment_config !== undefined) { sets.push('deployment_config = ?'); values.push(JSON.stringify(data.deployment_config)); }
     if (data.original_upload_history_id !== undefined) { sets.push('original_upload_history_id = ?'); values.push(data.original_upload_history_id); }
     if (data.delay_days !== undefined) { sets.push('delay_days = ?'); values.push(data.delay_days); }
+    if (data.last_auto_update_at !== undefined) { sets.push('last_auto_update_at = ?'); values.push(data.last_auto_update_at); }
+    if (data.last_auto_update_version !== undefined) { sets.push('last_auto_update_version = ?'); values.push(data.last_auto_update_version); }
     if (data.is_enabled !== undefined) {
       sets.push('is_enabled = ?');
       values.push(data.is_enabled ? 1 : 0);

@@ -1,8 +1,8 @@
 /**
  * Update detection for SQLite (single-tenant) mode.
- * Compares deployed apps (upload_history) against catalog latest versions
- * and writes results to update_check_results. Pure detection only — no
- * auto-update triggering (that's wired in later by Task 9).
+ * Compares deployed apps (upload_history) against catalog latest versions,
+ * writes results to update_check_results, then triggers auto-updates for
+ * newly-detected updates whose policy allows it (trigger-sqlite.ts).
  */
 import {
   sqliteListAllUploadHistory,
@@ -17,6 +17,7 @@ import { shouldSkipUpdate } from '@/types/update-policies';
 export interface RunUpdateCheckResult {
   usersChecked: number;
   updatesFound: number;
+  autoUpdates: { triggered: number; skipped: number; failed: number };
   errors: string[];
 }
 
@@ -25,7 +26,7 @@ export async function runUpdateCheck(): Promise<RunUpdateCheckResult> {
   const allUploads = sqliteListAllUploadHistory();
 
   if (allUploads.length === 0) {
-    return { usersChecked: 0, updatesFound: 0, errors };
+    return { usersChecked: 0, updatesFound: 0, autoUpdates: { triggered: 0, skipped: 0, failed: 0 }, errors };
   }
 
   const curatedApps = await getCatalogSource().getAllLatestVersions();
@@ -98,6 +99,10 @@ export async function runUpdateCheck(): Promise<RunUpdateCheckResult> {
 
   await sqliteUpdateChecks.upsertMany(allUpdates);
 
+  const { runAutoUpdatesForNewDetections } = await import('./trigger-sqlite');
+  const autoUpdateResult = await runAutoUpdatesForNewDetections(allUpdates);
+  errors.push(...autoUpdateResult.errors);
+
   for (const [userId, activeKeys] of activeKeysByUser) {
     try {
       await sqliteUpdateChecks.deleteStale(userId, activeKeys);
@@ -109,5 +114,14 @@ export async function runUpdateCheck(): Promise<RunUpdateCheckResult> {
   const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
   await sqliteUpdateChecks.deleteOlderThan(thirtyDaysAgo);
 
-  return { usersChecked: userTenantApps.size, updatesFound, errors };
+  return {
+    usersChecked: userTenantApps.size,
+    updatesFound,
+    autoUpdates: {
+      triggered: autoUpdateResult.triggered,
+      skipped: autoUpdateResult.skipped,
+      failed: autoUpdateResult.failed,
+    },
+    errors,
+  };
 }
