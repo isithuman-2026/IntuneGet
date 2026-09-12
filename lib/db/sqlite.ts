@@ -201,6 +201,89 @@ function initializeSchema(db: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_claimed_apps_tenant_id ON claimed_apps(tenant_id);
     CREATE UNIQUE INDEX IF NOT EXISTS idx_claimed_apps_tenant_discovered ON claimed_apps(tenant_id, discovered_app_id);
   `);
+
+  // Create update_check_results table
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS update_check_results (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      tenant_id TEXT NOT NULL,
+      winget_id TEXT NOT NULL,
+      intune_app_id TEXT NOT NULL,
+      display_name TEXT NOT NULL,
+      current_version TEXT NOT NULL,
+      latest_version TEXT NOT NULL,
+      is_critical INTEGER NOT NULL DEFAULT 0,
+      is_managed INTEGER NOT NULL DEFAULT 1,
+      notified_at TEXT,
+      dismissed_at TEXT,
+      detected_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(user_id, tenant_id, winget_id, intune_app_id)
+    )
+  `);
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_update_check_results_user ON update_check_results(user_id, tenant_id);
+  `);
+
+  // Create app_update_policies table
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS app_update_policies (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      tenant_id TEXT NOT NULL,
+      winget_id TEXT NOT NULL,
+      policy_type TEXT NOT NULL DEFAULT 'notify',
+      pinned_version TEXT,
+      deployment_config TEXT,
+      original_upload_history_id TEXT,
+      delay_days INTEGER NOT NULL DEFAULT 0,
+      last_auto_update_at TEXT,
+      last_auto_update_version TEXT,
+      is_enabled INTEGER NOT NULL DEFAULT 1,
+      consecutive_failures INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(user_id, tenant_id, winget_id)
+    )
+  `);
+
+  // Create auto_update_history table
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS auto_update_history (
+      id TEXT PRIMARY KEY,
+      policy_id TEXT NOT NULL,
+      packaging_job_id TEXT,
+      from_version TEXT NOT NULL,
+      to_version TEXT NOT NULL,
+      update_type TEXT NOT NULL,
+      status TEXT NOT NULL,
+      error_message TEXT,
+      triggered_at TEXT NOT NULL DEFAULT (datetime('now')),
+      completed_at TEXT
+    )
+  `);
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_auto_update_history_policy ON auto_update_history(policy_id);
+  `);
+
+  // Create notification_preferences table
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS notification_preferences (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL UNIQUE,
+      email_enabled INTEGER NOT NULL DEFAULT 0,
+      email_frequency TEXT NOT NULL DEFAULT 'daily',
+      email_address TEXT,
+      notify_critical_only INTEGER NOT NULL DEFAULT 0,
+      webhook_enabled INTEGER NOT NULL DEFAULT 1,
+      notify_on_update_available INTEGER NOT NULL DEFAULT 1,
+      notify_on_deployed INTEGER NOT NULL DEFAULT 1,
+      notify_on_error INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `);
 }
 
 /**
