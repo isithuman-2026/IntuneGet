@@ -680,6 +680,17 @@ export const sqliteDb: DatabaseAdapter = {
 };
 
 /**
+ * SQLite-only: list every upload_history row across all users.
+ * Not part of DatabaseAdapter - Supabase mode has no reason to list all users'
+ * deployments at once outside its own batched cron. Single-tenant SQLite mode
+ * has exactly one effective "user scope": every row in upload_history.
+ */
+export function sqliteListAllUploadHistory(): UploadHistoryRecord[] {
+  const database = getDb();
+  return database.prepare('SELECT * FROM upload_history').all() as UploadHistoryRecord[];
+}
+
+/**
  * Parse a webhook_configurations row from SQLite into a WebhookConfiguration
  */
 function parseWebhookRow(row: Record<string, unknown>): WebhookConfiguration {

@@ -14,6 +14,8 @@ import {
 } from '@/lib/auto-update/trigger';
 import { AppUpdatePolicy, shouldSkipUpdate } from '@/types/update-policies';
 import { getCatalogSource } from '@/lib/catalog';
+import { isSqliteMode } from '@/lib/db';
+import { runUpdateCheck } from '@/lib/auto-update/check-updates';
 
 const BATCH_SIZE = 50;
 
@@ -189,6 +191,17 @@ export async function GET(request: Request) {
   const authHeader = request.headers.get('authorization');
   if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
+  if (isSqliteMode()) {
+    const result = await runUpdateCheck();
+    return NextResponse.json({
+      success: result.errors.length === 0,
+      usersChecked: result.usersChecked,
+      updatesFound: result.updatesFound,
+      autoUpdates: { triggered: 0, skipped: 0, failed: 0 }, // wired in Task 8
+      errors: result.errors.length > 0 ? result.errors : undefined,
+    });
   }
 
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
