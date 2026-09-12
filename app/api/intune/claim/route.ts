@@ -5,6 +5,8 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient, isSupabaseServerConfigured } from '@/lib/supabase';
+import { isSqliteMode } from '@/lib/db';
+import { sqliteClaims } from '@/lib/db/sqlite';
 import { resolveTargetTenantId } from '@/lib/msp/tenant-resolution';
 import { parseAccessToken } from '@/lib/auth-utils';
 import type { ClaimAppRequest, ClaimedApp } from '@/types/unmanaged';
@@ -57,9 +59,6 @@ async function ensureUserProfile(
  */
 export async function POST(request: NextRequest) {
   try {
-    if (!isSupabaseServerConfigured()) {
-      return NextResponse.json({ error: 'App claims require hosted services' }, { status: 503 });
-    }
     const user = await parseAccessToken(request.headers.get('Authorization'));
     if (!user) {
       return NextResponse.json(
@@ -75,6 +74,23 @@ export async function POST(request: NextRequest) {
         { error: 'Missing required fields' },
         { status: 400 }
       );
+    }
+
+    if (isSqliteMode()) {
+      // No MSP tenant switching in SQLite mode - use the token's own tenant.
+      const claim = await sqliteClaims.upsertClaim({
+        userId: user.userId,
+        tenantId: user.tenantId,
+        discoveredAppId: body.discoveredAppId,
+        discoveredAppName: body.discoveredAppName,
+        wingetPackageId: body.wingetPackageId,
+        deviceCount: body.deviceCount || 0,
+      });
+      return NextResponse.json({ claim }, { status: 201 });
+    }
+
+    if (!isSupabaseServerConfigured()) {
+      return NextResponse.json({ error: 'App claims require hosted services' }, { status: 503 });
     }
 
     const supabase = createServerClient();
@@ -178,15 +194,21 @@ export async function POST(request: NextRequest) {
  */
 export async function GET(request: NextRequest) {
   try {
-    if (!isSupabaseServerConfigured()) {
-      return NextResponse.json({ claims: [] });
-    }
     const user = await parseAccessToken(request.headers.get('Authorization'));
     if (!user) {
       return NextResponse.json(
         { error: 'Authentication required' },
         { status: 401 }
       );
+    }
+
+    if (isSqliteMode()) {
+      const claims = await sqliteClaims.listByTenant(user.tenantId);
+      return NextResponse.json({ claims });
+    }
+
+    if (!isSupabaseServerConfigured()) {
+      return NextResponse.json({ claims: [] });
     }
 
     const supabase = createServerClient();
@@ -245,9 +267,6 @@ export async function GET(request: NextRequest) {
  */
 export async function PATCH(request: NextRequest) {
   try {
-    if (!isSupabaseServerConfigured()) {
-      return NextResponse.json({ error: 'App claims require hosted services' }, { status: 503 });
-    }
     const user = await parseAccessToken(request.headers.get('Authorization'));
     if (!user) {
       return NextResponse.json(
@@ -264,6 +283,18 @@ export async function PATCH(request: NextRequest) {
         { error: 'Missing claim ID' },
         { status: 400 }
       );
+    }
+
+    if (isSqliteMode()) {
+      const claim = await sqliteClaims.updateStatus(claimId, user.tenantId, { status, intuneAppId });
+      if (!claim) {
+        return NextResponse.json({ error: 'Failed to update claim' }, { status: 500 });
+      }
+      return NextResponse.json({ claim });
+    }
+
+    if (!isSupabaseServerConfigured()) {
+      return NextResponse.json({ error: 'App claims require hosted services' }, { status: 503 });
     }
 
     const supabase = createServerClient();

@@ -6,6 +6,8 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@/lib/supabase';
+import { isSqliteMode } from '@/lib/db';
+import { sqliteWebhooks } from '@/lib/db/sqlite';
 import { parseAccessToken } from '@/lib/auth-utils';
 import { validateWebhookUrl, detectWebhookType } from '@/lib/webhooks/service';
 import type {
@@ -25,6 +27,15 @@ export async function GET(request: NextRequest) {
         { error: 'Authentication required' },
         { status: 401 }
       );
+    }
+
+    if (isSqliteMode()) {
+      const webhooks = await sqliteWebhooks.listByUser(user.userId);
+      const sanitizedWebhooks = webhooks.map((webhook) => ({
+        ...webhook,
+        secret: webhook.secret ? '********' : null,
+      }));
+      return NextResponse.json({ webhooks: sanitizedWebhooks });
     }
 
     const supabase = createServerClient();
@@ -111,6 +122,31 @@ export async function POST(request: NextRequest) {
         { error: 'Invalid webhook type' },
         { status: 400 }
       );
+    }
+
+    if (isSqliteMode()) {
+      const count = await sqliteWebhooks.countByUser(user.userId);
+      if (count >= 10) {
+        return NextResponse.json(
+          { error: 'Maximum of 10 webhooks allowed per user' },
+          { status: 400 }
+        );
+      }
+
+      const webhook = await sqliteWebhooks.create(user.userId, {
+        name: body.name,
+        url: body.url,
+        webhook_type: webhookType,
+        secret: body.secret,
+        headers: body.headers,
+        is_enabled: body.is_enabled,
+      });
+
+      const sanitizedWebhook = {
+        ...webhook,
+        secret: webhook.secret ? '********' : null,
+      };
+      return NextResponse.json({ webhook: sanitizedWebhook }, { status: 201 });
     }
 
     const supabase = createServerClient();

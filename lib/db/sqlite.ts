@@ -7,6 +7,8 @@ import Database from 'better-sqlite3';
 import path from 'path';
 import fs from 'fs';
 import type { DatabaseAdapter, PackagingJob, UploadHistoryRecord } from './types';
+import type { WebhookConfiguration, WebhookConfigurationInput, WebhookConfigurationUpdate } from '@/types/notifications';
+import type { ClaimedApp } from '@/types/unmanaged';
 
 // Singleton database instance
 let db: Database.Database | null = null;
@@ -153,6 +155,51 @@ function initializeSchema(db: Database.Database): void {
   db.exec(`
     CREATE INDEX IF NOT EXISTS idx_upload_history_user_id ON upload_history(user_id);
     CREATE INDEX IF NOT EXISTS idx_upload_history_deployed_at ON upload_history(deployed_at);
+  `);
+
+  // Create webhook_configurations table
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS webhook_configurations (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      url TEXT NOT NULL,
+      webhook_type TEXT NOT NULL,
+      secret TEXT,
+      headers TEXT,
+      is_enabled INTEGER NOT NULL DEFAULT 1,
+      failure_count INTEGER NOT NULL DEFAULT 0,
+      last_failure_at TEXT,
+      last_success_at TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `);
+
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_webhook_configurations_user_id ON webhook_configurations(user_id);
+  `);
+
+  // Create claimed_apps table. No user_profiles FK here - that table is
+  // Supabase-only plumbing SQLite mode has no equivalent for.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS claimed_apps (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      tenant_id TEXT NOT NULL,
+      discovered_app_id TEXT NOT NULL,
+      discovered_app_name TEXT NOT NULL,
+      winget_package_id TEXT,
+      intune_app_id TEXT,
+      device_count_at_claim INTEGER NOT NULL DEFAULT 0,
+      status TEXT NOT NULL DEFAULT 'pending',
+      claimed_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `);
+
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_claimed_apps_tenant_id ON claimed_apps(tenant_id);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_claimed_apps_tenant_discovered ON claimed_apps(tenant_id, discovered_app_id);
   `);
 }
 
@@ -530,6 +577,224 @@ export const sqliteDb: DatabaseAdapter = {
       `);
       return stmt.all(userId, limit) as UploadHistoryRecord[];
     },
+  },
+};
+
+/**
+ * Parse a webhook_configurations row from SQLite into a WebhookConfiguration
+ */
+function parseWebhookRow(row: Record<string, unknown>): WebhookConfiguration {
+  return {
+    ...row,
+    headers: row.headers ? JSON.parse(row.headers as string) : {},
+    is_enabled: Boolean(row.is_enabled),
+  } as WebhookConfiguration;
+}
+
+/**
+ * SQLite-only webhook configuration storage.
+ * Not part of DatabaseAdapter - Supabase mode still talks to
+ * webhook_configurations directly via createServerClient(), so this stays
+ * a standalone module the webhook routes branch to in SQLite mode.
+ */
+export const sqliteWebhooks = {
+  async listByUser(userId: string): Promise<WebhookConfiguration[]> {
+    const database = getDb();
+    const stmt = database.prepare(`
+      SELECT * FROM webhook_configurations
+      WHERE user_id = ?
+      ORDER BY created_at DESC
+    `);
+    const rows = stmt.all(userId) as Record<string, unknown>[];
+    return rows.map(parseWebhookRow);
+  },
+
+  async countByUser(userId: string): Promise<number> {
+    const database = getDb();
+    const row = database
+      .prepare('SELECT COUNT(*) as count FROM webhook_configurations WHERE user_id = ?')
+      .get(userId) as { count: number };
+    return row.count;
+  },
+
+  async getById(id: string, userId: string): Promise<WebhookConfiguration | null> {
+    const database = getDb();
+    const row = database
+      .prepare('SELECT * FROM webhook_configurations WHERE id = ? AND user_id = ?')
+      .get(id, userId) as Record<string, unknown> | undefined;
+    return row ? parseWebhookRow(row) : null;
+  },
+
+  async create(userId: string, input: WebhookConfigurationInput): Promise<WebhookConfiguration> {
+    const database = getDb();
+    const id = crypto.randomUUID();
+    const now = new Date().toISOString();
+
+    database
+      .prepare(`
+        INSERT INTO webhook_configurations (
+          id, user_id, name, url, webhook_type, secret, headers,
+          is_enabled, failure_count, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
+      `)
+      .run(
+        id,
+        userId,
+        input.name.trim(),
+        input.url,
+        input.webhook_type,
+        input.secret || null,
+        JSON.stringify(input.headers || {}),
+        input.is_enabled ?? true ? 1 : 0,
+        now,
+        now
+      );
+
+    return (await this.getById(id, userId)) as WebhookConfiguration;
+  },
+
+  async update(
+    id: string,
+    userId: string,
+    data: WebhookConfigurationUpdate & {
+      failure_count?: number;
+      last_failure_at?: string | null;
+      last_success_at?: string | null;
+    }
+  ): Promise<WebhookConfiguration | null> {
+    const database = getDb();
+    const now = new Date().toISOString();
+
+    const updates: string[] = ['updated_at = ?'];
+    const values: unknown[] = [now];
+
+    if (data.name !== undefined) { updates.push('name = ?'); values.push(data.name.trim()); }
+    if (data.url !== undefined) { updates.push('url = ?'); values.push(data.url); }
+    if (data.webhook_type !== undefined) { updates.push('webhook_type = ?'); values.push(data.webhook_type); }
+    if (data.headers !== undefined) { updates.push('headers = ?'); values.push(JSON.stringify(data.headers)); }
+    if (data.is_enabled !== undefined) { updates.push('is_enabled = ?'); values.push(data.is_enabled ? 1 : 0); }
+    if ('secret' in data) { updates.push('secret = ?'); values.push(data.secret ?? null); }
+    if (data.failure_count !== undefined) { updates.push('failure_count = ?'); values.push(data.failure_count); }
+    if (data.last_failure_at !== undefined) { updates.push('last_failure_at = ?'); values.push(data.last_failure_at); }
+    if (data.last_success_at !== undefined) { updates.push('last_success_at = ?'); values.push(data.last_success_at); }
+
+    values.push(id, userId);
+
+    const result = database
+      .prepare(`UPDATE webhook_configurations SET ${updates.join(', ')} WHERE id = ? AND user_id = ?`)
+      .run(...values);
+
+    if (result.changes === 0) return null;
+    return this.getById(id, userId);
+  },
+
+  async remove(id: string, userId: string): Promise<boolean> {
+    const database = getDb();
+    const result = database
+      .prepare('DELETE FROM webhook_configurations WHERE id = ? AND user_id = ?')
+      .run(id, userId);
+    return result.changes > 0;
+  },
+};
+
+/**
+ * Parse a claimed_apps row from SQLite into a ClaimedApp
+ */
+function parseClaimedAppRow(row: Record<string, unknown>): ClaimedApp {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    tenantId: row.tenant_id,
+    discoveredAppId: row.discovered_app_id,
+    discoveredAppName: row.discovered_app_name,
+    wingetPackageId: row.winget_package_id,
+    intuneAppId: row.intune_app_id,
+    deviceCountAtClaim: row.device_count_at_claim,
+    claimedAt: row.claimed_at,
+    status: row.status,
+  } as ClaimedApp;
+}
+
+/**
+ * SQLite-only claimed-app storage (Discovered Apps -> claim flow).
+ * Not part of DatabaseAdapter - Supabase mode still talks to claimed_apps
+ * directly via createServerClient(), so this stays a standalone module the
+ * claim route branches to in SQLite mode. No user_profiles FK, unlike the
+ * Supabase schema - SQLite mode has no equivalent table for that.
+ */
+export const sqliteClaims = {
+  async listByTenant(tenantId: string): Promise<ClaimedApp[]> {
+    const database = getDb();
+    const rows = database
+      .prepare('SELECT * FROM claimed_apps WHERE tenant_id = ? ORDER BY claimed_at DESC')
+      .all(tenantId) as Record<string, unknown>[];
+    return rows.map(parseClaimedAppRow);
+  },
+
+  async getByTenantAndDiscoveredId(tenantId: string, discoveredAppId: string): Promise<ClaimedApp | null> {
+    const database = getDb();
+    const row = database
+      .prepare('SELECT * FROM claimed_apps WHERE tenant_id = ? AND discovered_app_id = ?')
+      .get(tenantId, discoveredAppId) as Record<string, unknown> | undefined;
+    return row ? parseClaimedAppRow(row) : null;
+  },
+
+  /**
+   * Create a new claim, or re-claim (update) an existing one for the same
+   * tenant + discovered app id - mirrors the Supabase route's upsert logic.
+   */
+  async upsertClaim(params: {
+    userId: string;
+    tenantId: string;
+    discoveredAppId: string;
+    discoveredAppName: string;
+    wingetPackageId: string;
+    deviceCount: number;
+  }): Promise<ClaimedApp> {
+    const database = getDb();
+    const existing = await this.getByTenantAndDiscoveredId(params.tenantId, params.discoveredAppId);
+    const now = new Date().toISOString();
+
+    if (existing) {
+      database
+        .prepare(`
+          UPDATE claimed_apps
+          SET user_id = ?, winget_package_id = ?, device_count_at_claim = ?, status = 'pending', claimed_at = ?
+          WHERE id = ?
+        `)
+        .run(params.userId, params.wingetPackageId, params.deviceCount, now, existing.id);
+      return (await this.getByTenantAndDiscoveredId(params.tenantId, params.discoveredAppId)) as ClaimedApp;
+    }
+
+    const id = crypto.randomUUID();
+    database
+      .prepare(`
+        INSERT INTO claimed_apps (
+          id, user_id, tenant_id, discovered_app_id, discovered_app_name,
+          winget_package_id, device_count_at_claim, status, claimed_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?)
+      `)
+      .run(id, params.userId, params.tenantId, params.discoveredAppId, params.discoveredAppName, params.wingetPackageId, params.deviceCount, now);
+
+    return (await this.getByTenantAndDiscoveredId(params.tenantId, params.discoveredAppId)) as ClaimedApp;
+  },
+
+  async updateStatus(claimId: string, tenantId: string, updates: { status?: string; intuneAppId?: string }): Promise<ClaimedApp | null> {
+    const database = getDb();
+    const sets: string[] = [];
+    const values: unknown[] = [];
+    if (updates.status !== undefined) { sets.push('status = ?'); values.push(updates.status); }
+    if (updates.intuneAppId !== undefined) { sets.push('intune_app_id = ?'); values.push(updates.intuneAppId); }
+    if (sets.length === 0) return null;
+
+    values.push(claimId, tenantId);
+    const result = database
+      .prepare(`UPDATE claimed_apps SET ${sets.join(', ')} WHERE id = ? AND tenant_id = ?`)
+      .run(...values);
+    if (result.changes === 0) return null;
+
+    const row = database.prepare('SELECT * FROM claimed_apps WHERE id = ?').get(claimId) as Record<string, unknown> | undefined;
+    return row ? parseClaimedAppRow(row) : null;
   },
 };
 

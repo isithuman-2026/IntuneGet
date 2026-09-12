@@ -7,6 +7,8 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@/lib/supabase';
+import { isSqliteMode } from '@/lib/db';
+import { sqliteWebhooks } from '@/lib/db/sqlite';
 import { parseAccessToken } from '@/lib/auth-utils';
 import { validateWebhookUrl } from '@/lib/webhooks/service';
 import type {
@@ -37,6 +39,21 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     }
 
     const { id } = await params;
+
+    if (isSqliteMode()) {
+      const webhook = await sqliteWebhooks.getById(id, user.userId);
+      if (!webhook) {
+        return NextResponse.json(
+          { error: 'Webhook not found' },
+          { status: 404 }
+        );
+      }
+      const sanitizedWebhook = {
+        ...webhook,
+        secret: webhook.secret ? '********' : null,
+      };
+      return NextResponse.json({ webhook: sanitizedWebhook });
+    }
 
     const supabase = createServerClient();
 
@@ -113,6 +130,21 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
         { error: 'Invalid webhook type' },
         { status: 400 }
       );
+    }
+
+    if (isSqliteMode()) {
+      const webhook = await sqliteWebhooks.update(id, user.userId, body);
+      if (!webhook) {
+        return NextResponse.json(
+          { error: 'Webhook not found' },
+          { status: 404 }
+        );
+      }
+      const sanitizedWebhook = {
+        ...webhook,
+        secret: webhook.secret ? '********' : null,
+      };
+      return NextResponse.json({ webhook: sanitizedWebhook });
     }
 
     const supabase = createServerClient();
@@ -193,6 +225,11 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
     }
 
     const { id } = await params;
+
+    if (isSqliteMode()) {
+      await sqliteWebhooks.remove(id, user.userId);
+      return NextResponse.json({ success: true });
+    }
 
     const supabase = createServerClient();
 

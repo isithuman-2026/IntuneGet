@@ -5,6 +5,8 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient, isSupabaseConfigured } from '@/lib/supabase';
+import { isSqliteMode } from '@/lib/db';
+import { sqliteClaims } from '@/lib/db/sqlite';
 import { resolveTargetTenantId } from '@/lib/msp/tenant-resolution';
 import { parseAccessToken } from '@/lib/auth-utils';
 import { matchDiscoveredApp, filterUserApps, isSystemApp, normalizeAppName } from '@/lib/matching/app-matcher';
@@ -532,12 +534,18 @@ export async function GET(request: NextRequest) {
     const now = new Date().toISOString();
     const unmanagedApps: UnmanagedApp[] = [];
 
-    // Get claimed apps + manual mappings. In sqlite mode there is no Supabase to
-    // query, so these stay empty: every app is unclaimed and auto-matched.
+    // Get claimed apps + manual mappings. In sqlite mode there is no manual-mapping
+    // table equivalent, but claimed_apps does have a SQLite table now (see
+    // sqliteClaims) so claims still hide deployed apps and reflect claim status.
     const claimedMap = new Map<string, string>();
     const manualMappingMap = new Map<string, ManualMappingRow>();
 
-    if (supabase) {
+    if (isSqliteMode()) {
+      const claims = await sqliteClaims.listByTenant(tenantId);
+      for (const c of claims) {
+        claimedMap.set(c.discoveredAppId, c.status);
+      }
+    } else if (supabase) {
       const { data: claimedApps } = await supabase
         .from('claimed_apps')
         .select('discovered_app_id, status')

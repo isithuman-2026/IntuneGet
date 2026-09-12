@@ -5,6 +5,8 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@/lib/supabase';
+import { isSqliteMode } from '@/lib/db';
+import { sqliteWebhooks } from '@/lib/db/sqlite';
 import { parseAccessToken } from '@/lib/auth-utils';
 import { sendTestWebhook } from '@/lib/webhooks/service';
 import type { WebhookConfiguration } from '@/types/notifications';
@@ -33,17 +35,20 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
 
     const { id } = await params;
 
-    const supabase = createServerClient();
+    const webhook = isSqliteMode()
+      ? await sqliteWebhooks.getById(id, user.userId)
+      : await (async () => {
+          const supabase = createServerClient();
+          const { data, error: fetchError } = await supabase
+            .from('webhook_configurations')
+            .select('*')
+            .eq('id', id)
+            .eq('user_id', user.userId)
+            .single();
+          return fetchError ? null : data;
+        })();
 
-    // Get webhook configuration
-    const { data: webhook, error: fetchError } = await supabase
-      .from('webhook_configurations')
-      .select('*')
-      .eq('id', id)
-      .eq('user_id', user.userId)
-      .single();
-
-    if (fetchError || !webhook) {
+    if (!webhook) {
       return NextResponse.json(
         { error: 'Webhook not found' },
         { status: 404 }
@@ -66,10 +71,15 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       statusUpdate.failure_count = (webhook.failure_count || 0) + 1;
     }
 
-    await supabase
-      .from('webhook_configurations')
-      .update(statusUpdate)
-      .eq('id', id);
+    if (isSqliteMode()) {
+      await sqliteWebhooks.update(id, user.userId, statusUpdate);
+    } else {
+      const supabase = createServerClient();
+      await supabase
+        .from('webhook_configurations')
+        .update(statusUpdate)
+        .eq('id', id);
+    }
 
     return NextResponse.json({
       success: result.success,
