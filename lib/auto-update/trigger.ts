@@ -35,7 +35,7 @@ import {
 import type { NormalizedInstaller, WingetInstaller, WingetScope } from '@/types/winget';
 import { DEFAULT_PSADT_CONFIG, type DetectionRule } from '@/types/psadt';
 
-interface TriggerResult {
+export interface TriggerResult {
   success: boolean;
   packagingJobId?: string;
   historyId?: string;
@@ -873,8 +873,11 @@ export function createAutoUpdateTrigger(): AutoUpdateTrigger | null {
  * Get installer info from curated_apps and version_history
  */
 export async function getLatestInstallerInfo(
-  // Kept for call-site compatibility; the catalog source owns client creation.
-  _supabase: SupabaseClient,
+  // Unused - the catalog source owns client creation. Typed as
+  // possibly-undefined (rather than `?`, which TS disallows before a
+  // required param) so SQLite call sites can pass `undefined` while
+  // existing Supabase-mode callers are unaffected.
+  _supabase: SupabaseClient | undefined,
   wingetId: string,
   architecture?: string,
   installScope?: string
