@@ -135,6 +135,15 @@ export async function POST(request: NextRequest) {
         code: data.errorCode,
       });
 
+      if (isSqliteMode()) {
+        const { notifyUserOfUpdateError } = await import('@/lib/notifications/notify-user');
+        await notifyUserOfUpdateError(currentJob.user_id, currentJob.tenant_id || '', {
+          wingetId: currentJob.winget_id,
+          displayName: currentJob.display_name,
+          errorMessage: data.message || 'Unknown error',
+        }).catch((err) => console.error('[Callback] Error notification failed:', err));
+      }
+
       // Persist the quarantine before making the job terminal when the legacy
       // job contains a complete trusted tuple. Dispatch preflight still fails
       // closed if shared state is unavailable, so callback bookkeeping must not
@@ -197,6 +206,16 @@ export async function POST(request: NextRequest) {
         // The terminal job state is authoritative. Do not ask the workflow to
         // retry a callback that can no longer repeat this side effect.
         console.error(`[Callback] Failed to create upload history for ${data.jobId}:`, historyError);
+      }
+
+      if (isSqliteMode()) {
+        const { notifyUserOfDeployedUpdate } = await import('@/lib/notifications/notify-user');
+        await notifyUserOfDeployedUpdate(currentJob.user_id, currentJob.tenant_id || '', {
+          wingetId: currentJob.winget_id,
+          displayName: currentJob.display_name,
+          version: currentJob.version,
+          intuneAppId: data.intuneAppId,
+        }).catch((err) => console.error('[Callback] Deployed notification failed:', err));
       }
 
       // Materialize an update policy chosen in the cart, now that the

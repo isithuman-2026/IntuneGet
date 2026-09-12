@@ -1,4 +1,7 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import path from 'path';
+import os from 'os';
+import fs from 'fs';
 
 const { sendEmailMock, isEmailConfiguredMock, deliverWebhookMock } = vi.hoisted(() => ({
   sendEmailMock: vi.fn(),
@@ -86,5 +89,51 @@ describe('notifyUserOfPendingUpdates', () => {
 
     expect(res.notifiedUpdateIds).toEqual([]);
     expect(calls.markNotified.flat()).not.toContain('upd1');
+  });
+});
+
+describe('SQLite-mode deployed/error notifications', () => {
+  let tmpDbPath: string;
+
+  beforeEach(() => {
+    tmpDbPath = path.join(os.tmpdir(), `test-notify-${Date.now()}.db`);
+    process.env.DATABASE_PATH = tmpDbPath;
+    process.env.DATABASE_MODE = 'sqlite';
+    vi.resetModules();
+  });
+
+  afterEach(async () => {
+    const { closeSqliteDb } = await import('../db/sqlite');
+    closeSqliteDb();
+    fs.rmSync(tmpDbPath, { force: true });
+    delete process.env.DATABASE_MODE;
+    vi.restoreAllMocks();
+  });
+
+  it('does not call deliverWebhook when notify_on_deployed is false', async () => {
+    const { sqliteWebhooks, sqliteNotificationPreferences } = await import('../db/sqlite');
+    await sqliteWebhooks.create('user-1', { name: 'test', url: 'https://discord.com/api/webhooks/x/y', webhook_type: 'discord' });
+    await sqliteNotificationPreferences.upsert('user-1', { notify_on_deployed: false });
+
+    const deliverMock = vi.fn().mockResolvedValue({ success: true });
+    vi.doMock('@/lib/webhooks/service', () => ({ deliverWebhook: deliverMock }));
+
+    const { notifyUserOfDeployedUpdate } = await import('./notify-user');
+    await notifyUserOfDeployedUpdate('user-1', 'tenant-1', { wingetId: '7zip.7zip', displayName: '7-Zip', version: '23.0', intuneAppId: 'app-1' });
+
+    expect(deliverMock).not.toHaveBeenCalled();
+  });
+
+  it('calls deliverWebhook when notify_on_deployed is true (the default)', async () => {
+    const { sqliteWebhooks } = await import('../db/sqlite');
+    await sqliteWebhooks.create('user-1', { name: 'test', url: 'https://discord.com/api/webhooks/x/y', webhook_type: 'discord' });
+
+    const deliverMock = vi.fn().mockResolvedValue({ success: true });
+    vi.doMock('@/lib/webhooks/service', () => ({ deliverWebhook: deliverMock }));
+
+    const { notifyUserOfDeployedUpdate } = await import('./notify-user');
+    await notifyUserOfDeployedUpdate('user-1', 'tenant-1', { wingetId: '7zip.7zip', displayName: '7-Zip', version: '23.0', intuneAppId: 'app-1' });
+
+    expect(deliverMock).toHaveBeenCalledTimes(1);
   });
 });

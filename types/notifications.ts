@@ -122,7 +122,7 @@ export interface AppUpdate {
 }
 
 export interface NotificationPayload {
-  event: 'app_updates_available';
+  event: 'app_updates_available' | 'app_deployed' | 'app_update_error';
   timestamp: string;
   tenant_id: string;
   tenant_name?: string;
@@ -131,6 +131,7 @@ export interface NotificationPayload {
     total: number;
     critical: number;
   };
+  error_message?: string;
 }
 
 /**

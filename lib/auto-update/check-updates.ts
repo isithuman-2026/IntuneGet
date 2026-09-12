@@ -99,6 +99,33 @@ export async function runUpdateCheck(): Promise<RunUpdateCheckResult> {
 
   await sqliteUpdateChecks.upsertMany(allUpdates);
 
+  const newlyDetected = allUpdates.filter((u) => u.notified_at === null);
+  if (newlyDetected.length > 0) {
+    const { sqliteWebhooks, sqliteNotificationPreferences } = await import('@/lib/db/sqlite');
+    const { deliverWebhook } = await import('@/lib/webhooks/service');
+    const byUser = new Map<string, typeof newlyDetected>();
+    newlyDetected.forEach((u) => {
+      if (!byUser.has(u.user_id)) byUser.set(u.user_id, []);
+      byUser.get(u.user_id)!.push(u);
+    });
+    for (const [userId, userUpdates] of byUser) {
+      const prefs = await sqliteNotificationPreferences.get(userId);
+      if (prefs && (!prefs.webhook_enabled || !prefs.notify_on_update_available)) continue;
+      const webhooks = (await sqliteWebhooks.listByUser(userId)).filter((w) => w.is_enabled);
+      if (webhooks.length === 0) continue;
+      const payload = {
+        event: 'app_updates_available' as const,
+        timestamp: new Date().toISOString(),
+        tenant_id: userUpdates[0].tenant_id,
+        updates: userUpdates.map((u) => ({ app_name: u.display_name, winget_id: u.winget_id, intune_app_id: u.intune_app_id, current_version: u.current_version, latest_version: u.latest_version, is_critical: u.is_critical })),
+        summary: { total: userUpdates.length, critical: userUpdates.filter((u) => u.is_critical).length },
+      };
+      for (const webhook of webhooks) {
+        await deliverWebhook(webhook, payload).catch((err) => errors.push(`Webhook to ${webhook.name} failed: ${err instanceof Error ? err.message : String(err)}`));
+      }
+    }
+  }
+
   const { runAutoUpdatesForNewDetections } = await import('./trigger-sqlite');
   const autoUpdateResult = await runAutoUpdatesForNewDetections(allUpdates);
   errors.push(...autoUpdateResult.errors);

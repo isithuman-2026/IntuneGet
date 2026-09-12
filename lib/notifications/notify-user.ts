@@ -11,6 +11,8 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { sendUpdateNotificationEmail, isEmailConfigured } from '@/lib/email/service';
 import { deliverWebhook } from '@/lib/webhooks/service';
+import { isSqliteMode } from '@/lib/db';
+import { sqliteWebhooks, sqliteNotificationPreferences } from '@/lib/db/sqlite';
 import type {
   NotificationPreferences,
   WebhookConfiguration,
@@ -233,6 +235,68 @@ export async function notifyUserOfPendingUpdates(
 
   await markNotified(supabase, result.notifiedUpdateIds);
   return result;
+}
+
+/**
+ * SQLite-mode-only notification for a successfully deployed app update.
+ * No-op in Supabase mode (that path keeps its existing behavior via
+ * notifyUserOfPendingUpdates).
+ */
+export async function notifyUserOfDeployedUpdate(
+  userId: string,
+  tenantId: string,
+  info: { wingetId: string; displayName: string; version: string; intuneAppId: string }
+): Promise<void> {
+  if (!isSqliteMode()) return;
+  const prefs = await sqliteNotificationPreferences.get(userId);
+  if (prefs && (!prefs.webhook_enabled || !prefs.notify_on_deployed)) return;
+
+  const webhooks = await sqliteWebhooks.listByUser(userId);
+  const enabledWebhooks = webhooks.filter((w) => w.is_enabled);
+  if (enabledWebhooks.length === 0) return;
+
+  const payload: NotificationPayload = {
+    event: 'app_deployed',
+    timestamp: new Date().toISOString(),
+    tenant_id: tenantId,
+    updates: [{ app_name: info.displayName, winget_id: info.wingetId, intune_app_id: info.intuneAppId, current_version: '', latest_version: info.version, is_critical: false }],
+    summary: { total: 1, critical: 0 },
+  };
+
+  for (const webhook of enabledWebhooks) {
+    await deliverWebhook(webhook, payload).catch((err) => console.error(`[Notify] Deployed-webhook to ${webhook.name} failed:`, err));
+  }
+}
+
+/**
+ * SQLite-mode-only notification for a failed app update. No-op in Supabase
+ * mode.
+ */
+export async function notifyUserOfUpdateError(
+  userId: string,
+  tenantId: string,
+  info: { wingetId: string; displayName: string; errorMessage: string }
+): Promise<void> {
+  if (!isSqliteMode()) return;
+  const prefs = await sqliteNotificationPreferences.get(userId);
+  if (prefs && (!prefs.webhook_enabled || !prefs.notify_on_error)) return;
+
+  const webhooks = await sqliteWebhooks.listByUser(userId);
+  const enabledWebhooks = webhooks.filter((w) => w.is_enabled);
+  if (enabledWebhooks.length === 0) return;
+
+  const payload: NotificationPayload = {
+    event: 'app_update_error',
+    timestamp: new Date().toISOString(),
+    tenant_id: tenantId,
+    updates: [{ app_name: info.displayName, winget_id: info.wingetId, intune_app_id: '', current_version: '', latest_version: '', is_critical: false }],
+    summary: { total: 1, critical: 0 },
+    error_message: info.errorMessage,
+  };
+
+  for (const webhook of enabledWebhooks) {
+    await deliverWebhook(webhook, payload).catch((err) => console.error(`[Notify] Error-webhook to ${webhook.name} failed:`, err));
+  }
 }
 
 async function markNotified(supabase: SupabaseClient, ids: string[]): Promise<void> {

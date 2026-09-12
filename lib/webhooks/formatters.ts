@@ -68,10 +68,29 @@ const DISCORD_CRITICAL_COLOR = 0xdc2626;
 const DISCORD_SUCCESS_COLOR = 0x22c55e;
 
 /**
+ * Title text for the three notification events. app_updates_available keeps
+ * its existing critical/total-based title; the other two describe the single
+ * app in payload.updates[0].
+ */
+function getEventTitle(payload: NotificationPayload): string {
+  const app = payload.updates[0];
+  if (payload.event === 'app_deployed') {
+    return app ? `Deployed: ${app.app_name} ${app.latest_version}` : 'App Deployed';
+  }
+  if (payload.event === 'app_update_error') {
+    return app ? `Update Failed: ${app.app_name}` : 'Update Failed';
+  }
+  const { summary } = payload;
+  return summary.critical > 0
+    ? `${summary.critical} Critical App Update${summary.critical > 1 ? 's' : ''} Available`
+    : `${summary.total} App Update${summary.total > 1 ? 's' : ''} Available`;
+}
+
+/**
  * Format notification payload for Slack Block Kit
  */
 export function formatSlackMessage(payload: NotificationPayload): SlackPayload {
-  const { updates, summary, tenant_name } = payload;
+  const { updates, summary, tenant_name, event, error_message } = payload;
   const criticalUpdates = updates.filter((u) => u.is_critical);
   const regularUpdates = updates.filter((u) => !u.is_critical);
 
@@ -81,9 +100,7 @@ export function formatSlackMessage(payload: NotificationPayload): SlackPayload {
       type: 'header',
       text: {
         type: 'plain_text',
-        text: summary.critical > 0
-          ? `${summary.critical} Critical App Update${summary.critical > 1 ? 's' : ''} Available`
-          : `${summary.total} App Update${summary.total > 1 ? 's' : ''} Available`,
+        text: getEventTitle(payload),
         emoji: true,
       },
     },
@@ -97,6 +114,23 @@ export function formatSlackMessage(payload: NotificationPayload): SlackPayload {
         },
       ],
     },
+  ];
+
+  if (event === 'app_update_error') {
+    blocks.push({
+      type: 'section',
+      text: { type: 'mrkdwn', text: `*Error:*\n${error_message || 'Unknown error'}` },
+    });
+    blocks.push({ type: 'divider' });
+    return { blocks, data: buildWebhookData(payload) };
+  }
+
+  if (event === 'app_deployed') {
+    blocks.push({ type: 'divider' });
+    return { blocks, data: buildWebhookData(payload) };
+  }
+
+  blocks.push(
     // Summary
     {
       type: 'section',
@@ -113,8 +147,8 @@ export function formatSlackMessage(payload: NotificationPayload): SlackPayload {
     },
     {
       type: 'divider',
-    },
-  ];
+    }
+  );
 
   // Critical updates section
   if (criticalUpdates.length > 0) {
@@ -206,7 +240,7 @@ function formatSlackAppBlock(app: AppUpdate): any {
  * Format notification payload for Microsoft Teams Adaptive Card
  */
 export function formatTeamsMessage(payload: NotificationPayload): TeamsPayload {
-  const { updates, summary, tenant_name } = payload;
+  const { updates, summary, tenant_name, event, error_message } = payload;
   const criticalUpdates = updates.filter((u) => u.is_critical);
   const regularUpdates = updates.filter((u) => !u.is_critical);
 
@@ -214,9 +248,7 @@ export function formatTeamsMessage(payload: NotificationPayload): TeamsPayload {
     // Header
     {
       type: 'TextBlock',
-      text: summary.critical > 0
-        ? `${summary.critical} Critical App Update${summary.critical > 1 ? 's' : ''} Available`
-        : `${summary.total} App Update${summary.total > 1 ? 's' : ''} Available`,
+      text: getEventTitle(payload),
       size: 'Large',
       weight: 'Bolder',
       wrap: true,
@@ -229,15 +261,24 @@ export function formatTeamsMessage(payload: NotificationPayload): TeamsPayload {
       isSubtle: true,
       wrap: true,
     },
-    // Summary facts
-    {
-      type: 'FactSet',
-      facts: [
-        { title: 'Total Updates', value: summary.total.toString() },
-        { title: 'Critical Updates', value: summary.critical.toString() },
-      ],
-    },
   ];
+
+  if (event === 'app_update_error') {
+    body.push({ type: 'TextBlock', text: error_message || 'Unknown error', wrap: true });
+    return buildTeamsPayload(payload, body);
+  }
+
+  if (event === 'app_deployed') {
+    return buildTeamsPayload(payload, body);
+  }
+
+  body.push({
+    type: 'FactSet',
+    facts: [
+      { title: 'Total Updates', value: summary.total.toString() },
+      { title: 'Critical Updates', value: summary.critical.toString() },
+    ],
+  });
 
   // Critical updates section
   if (criticalUpdates.length > 0) {
@@ -280,6 +321,13 @@ export function formatTeamsMessage(payload: NotificationPayload): TeamsPayload {
     }
   }
 
+  return buildTeamsPayload(payload, body);
+}
+
+/**
+ * Wrap a Teams Adaptive Card body into the full attachments envelope.
+ */
+function buildTeamsPayload(payload: NotificationPayload, body: any[]): TeamsPayload {
   return {
     type: 'message',
     data: buildWebhookData(payload),
@@ -341,17 +389,39 @@ function formatTeamsAppCard(app: AppUpdate) {
  * Format notification payload for Discord embed
  */
 export function formatDiscordMessage(payload: NotificationPayload): DiscordPayload {
-  const { updates, summary, tenant_name } = payload;
+  const { updates, summary, tenant_name, event, error_message } = payload;
   const criticalUpdates = updates.filter((u) => u.is_critical);
   const regularUpdates = updates.filter((u) => !u.is_critical);
 
   const embeds = [];
 
+  if (event === 'app_update_error') {
+    embeds.push({
+      title: getEventTitle(payload),
+      description: error_message || 'Unknown error',
+      color: DISCORD_CRITICAL_COLOR,
+      fields: [],
+      footer: { text: 'IntuneGet' },
+      timestamp: payload.timestamp,
+    });
+    return { embeds, data: buildWebhookData(payload) };
+  }
+
+  if (event === 'app_deployed') {
+    embeds.push({
+      title: getEventTitle(payload),
+      description: tenant_name ? `Tenant: ${tenant_name}` : undefined,
+      color: DISCORD_SUCCESS_COLOR,
+      fields: [],
+      footer: { text: 'IntuneGet' },
+      timestamp: payload.timestamp,
+    });
+    return { embeds, data: buildWebhookData(payload) };
+  }
+
   // Main embed
   const mainEmbed = {
-    title: summary.critical > 0
-      ? `${summary.critical} Critical App Update${summary.critical > 1 ? 's' : ''} Available`
-      : `${summary.total} App Update${summary.total > 1 ? 's' : ''} Available`,
+    title: getEventTitle(payload),
     description: tenant_name ? `Tenant: ${tenant_name}` : undefined,
     color: summary.critical > 0 ? DISCORD_CRITICAL_COLOR : DISCORD_BRAND_COLOR,
     fields: [
