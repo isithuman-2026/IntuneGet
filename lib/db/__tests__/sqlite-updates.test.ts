@@ -62,4 +62,38 @@ describe('sqlite update-detection schema', () => {
     expect(updated.id).toBe(policy.id);
     expect(updated.policy_type).toBe('auto_update');
   });
+
+  it('sqliteUpdateChecks upsertMany then listByUser round-trips and deleteStale removes stale rows', async () => {
+    const { sqliteUpdateChecks } = await import('../sqlite');
+    const now = new Date().toISOString();
+    await sqliteUpdateChecks.upsertMany([{
+      user_id: 'user-1', tenant_id: 'tenant-1', winget_id: 'VideoLAN.VLC',
+      intune_app_id: 'app-1', display_name: 'VLC', current_version: '3.0.22',
+      latest_version: '3.0.23', is_critical: false, is_managed: true,
+      notified_at: null, detected_at: now, updated_at: now,
+    }]);
+
+    const list = await sqliteUpdateChecks.listByUser('user-1');
+    expect(list).toHaveLength(1);
+    expect(list[0].latest_version).toBe('3.0.23');
+
+    const removed = await sqliteUpdateChecks.deleteStale('user-1', new Set());
+    expect(removed).toBe(1);
+    expect(await sqliteUpdateChecks.listByUser('user-1')).toHaveLength(0);
+  });
+
+  it('sqliteAutoUpdateHistory create/updateStatus/countSince', async () => {
+    const { sqliteUpdatePolicies, sqliteAutoUpdateHistory } = await import('../sqlite');
+    const { policy } = await sqliteUpdatePolicies.upsert('user-2', {
+      winget_id: '7zip.7zip', tenant_id: 'tenant-2', policy_type: 'auto_update',
+    });
+    const { id } = await sqliteAutoUpdateHistory.create(policy.id, '22.0', '23.0', 'minor');
+    await sqliteAutoUpdateHistory.updateStatus(id, 'completed', { completedAt: new Date().toISOString() });
+
+    const count = await sqliteAutoUpdateHistory.countSince([policy.id], new Date(Date.now() - 3600_000).toISOString());
+    expect(count).toBe(1);
+
+    const recent = await sqliteAutoUpdateHistory.hasRecentForPolicy(policy.id, new Date(Date.now() - 3600_000).toISOString());
+    expect(recent).toBe(true);
+  });
 });

@@ -938,6 +938,178 @@ export const sqliteUpdatePolicies = {
   },
 };
 
+export interface UpdateCheckInsert {
+  user_id: string;
+  tenant_id: string;
+  winget_id: string;
+  intune_app_id: string;
+  display_name: string;
+  current_version: string;
+  latest_version: string;
+  is_critical: boolean;
+  is_managed: boolean;
+  notified_at: string | null;
+  detected_at: string;
+  updated_at: string;
+}
+
+export interface UpdateCheckRow extends UpdateCheckInsert {
+  id: string;
+  dismissed_at: string | null;
+}
+
+function parseUpdateCheckRow(row: Record<string, unknown>): UpdateCheckRow {
+  return {
+    ...row,
+    is_critical: Boolean(row.is_critical),
+    is_managed: Boolean(row.is_managed),
+  } as UpdateCheckRow;
+}
+
+/**
+ * SQLite-only update check results storage for managing detected app updates.
+ * Stores individual package versions detected on user devices and update dismissals.
+ */
+export const sqliteUpdateChecks = {
+  async listByUser(
+    userId: string,
+    opts: { tenantId?: string; includeDismissed?: boolean; criticalOnly?: boolean } = {}
+  ): Promise<UpdateCheckRow[]> {
+    const database = getDb();
+    const conditions = ['user_id = ?'];
+    const values: unknown[] = [userId];
+    if (opts.tenantId) { conditions.push('tenant_id = ?'); values.push(opts.tenantId); }
+    if (!opts.includeDismissed) { conditions.push('dismissed_at IS NULL'); }
+    if (opts.criticalOnly) { conditions.push('is_critical = 1'); }
+    const rows = database
+      .prepare(`SELECT * FROM update_check_results WHERE ${conditions.join(' AND ')} ORDER BY detected_at DESC`)
+      .all(...values) as Record<string, unknown>[];
+    return rows.map(parseUpdateCheckRow);
+  },
+
+  async getOne(userId: string, tenantId: string, wingetId: string): Promise<UpdateCheckRow | null> {
+    const database = getDb();
+    const row = database
+      .prepare('SELECT * FROM update_check_results WHERE user_id = ? AND tenant_id = ? AND winget_id = ?')
+      .get(userId, tenantId, wingetId) as Record<string, unknown> | undefined;
+    return row ? parseUpdateCheckRow(row) : null;
+  },
+
+  async upsertMany(rows: UpdateCheckInsert[]): Promise<void> {
+    if (rows.length === 0) return;
+    const database = getDb();
+    const stmt = database.prepare(`
+      INSERT INTO update_check_results (
+        id, user_id, tenant_id, winget_id, intune_app_id, display_name,
+        current_version, latest_version, is_critical, is_managed,
+        notified_at, detected_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(user_id, tenant_id, winget_id, intune_app_id) DO UPDATE SET
+        display_name = excluded.display_name,
+        current_version = excluded.current_version,
+        latest_version = excluded.latest_version,
+        is_critical = excluded.is_critical,
+        is_managed = excluded.is_managed,
+        notified_at = excluded.notified_at,
+        detected_at = excluded.detected_at,
+        updated_at = excluded.updated_at
+    `);
+    const insertAll = database.transaction((items: UpdateCheckInsert[]) => {
+      for (const r of items) {
+        stmt.run(
+          crypto.randomUUID(), r.user_id, r.tenant_id, r.winget_id, r.intune_app_id,
+          r.display_name, r.current_version, r.latest_version,
+          r.is_critical ? 1 : 0, r.is_managed ? 1 : 0, r.notified_at, r.detected_at, r.updated_at
+        );
+      }
+    });
+    insertAll(rows);
+  },
+
+  async deleteStale(userId: string, activeKeys: Set<string>): Promise<number> {
+    const database = getDb();
+    const rows = database
+      .prepare('SELECT id, winget_id, intune_app_id FROM update_check_results WHERE user_id = ?')
+      .all(userId) as Array<{ id: string; winget_id: string; intune_app_id: string }>;
+    const staleIds = rows
+      .filter((r) => !activeKeys.has(`${r.winget_id}:${r.intune_app_id}`))
+      .map((r) => r.id);
+    if (staleIds.length === 0) return 0;
+    const placeholders = staleIds.map(() => '?').join(', ');
+    const result = database.prepare(`DELETE FROM update_check_results WHERE id IN (${placeholders})`).run(...staleIds);
+    return result.changes;
+  },
+
+  async deleteOlderThan(cutoffIso: string): Promise<number> {
+    const database = getDb();
+    const result = database.prepare('DELETE FROM update_check_results WHERE detected_at < ?').run(cutoffIso);
+    return result.changes;
+  },
+
+  async dismiss(userId: string, ids: string[], dismissed: boolean): Promise<number> {
+    const database = getDb();
+    const placeholders = ids.map(() => '?').join(', ');
+    const now = new Date().toISOString();
+    const result = database
+      .prepare(`UPDATE update_check_results SET dismissed_at = ?, updated_at = ? WHERE id IN (${placeholders}) AND user_id = ?`)
+      .run(dismissed ? now : null, now, ...ids, userId);
+    return result.changes;
+  },
+};
+
+/**
+ * SQLite-only auto-update history tracking for deployed package updates.
+ * Records the history of automatic updates triggered by policies, from
+ * packaging through deployment.
+ */
+export const sqliteAutoUpdateHistory = {
+  async create(policyId: string, fromVersion: string, toVersion: string, updateType: string): Promise<{ id: string }> {
+    const database = getDb();
+    const id = crypto.randomUUID();
+    database
+      .prepare(`
+        INSERT INTO auto_update_history (id, policy_id, from_version, to_version, update_type, status, triggered_at)
+        VALUES (?, ?, ?, ?, ?, 'pending', ?)
+      `)
+      .run(id, policyId, fromVersion, toVersion, updateType, new Date().toISOString());
+    return { id };
+  },
+
+  async updateStatus(
+    id: string,
+    status: string,
+    extra: { packagingJobId?: string; errorMessage?: string; completedAt?: string } = {}
+  ): Promise<void> {
+    const database = getDb();
+    const sets = ['status = ?'];
+    const values: unknown[] = [status];
+    if (extra.packagingJobId !== undefined) { sets.push('packaging_job_id = ?'); values.push(extra.packagingJobId); }
+    if (extra.errorMessage !== undefined) { sets.push('error_message = ?'); values.push(extra.errorMessage); }
+    if (extra.completedAt !== undefined) { sets.push('completed_at = ?'); values.push(extra.completedAt); }
+    values.push(id);
+    database.prepare(`UPDATE auto_update_history SET ${sets.join(', ')} WHERE id = ?`).run(...values);
+  },
+
+  async countSince(policyIds: string[], sinceIso: string, statusFilter?: string): Promise<number> {
+    if (policyIds.length === 0) return 0;
+    const database = getDb();
+    const placeholders = policyIds.map(() => '?').join(', ');
+    const statusClause = statusFilter ? 'AND status = ?' : '';
+    const row = database
+      .prepare(`SELECT COUNT(*) as count FROM auto_update_history WHERE policy_id IN (${placeholders}) AND triggered_at >= ? ${statusClause}`)
+      .get(...policyIds, sinceIso, ...(statusFilter ? [statusFilter] : [])) as { count: number };
+    return row.count;
+  },
+
+  async hasRecentForPolicy(policyId: string, sinceIso: string): Promise<boolean> {
+    const database = getDb();
+    const row = database
+      .prepare('SELECT id FROM auto_update_history WHERE policy_id = ? AND triggered_at >= ? LIMIT 1')
+      .get(policyId, sinceIso);
+    return Boolean(row);
+  },
+};
+
 /**
  * SQLite-only claimed-app storage (Discovered Apps -> claim flow).
  * Not part of DatabaseAdapter - Supabase mode still talks to claimed_apps
