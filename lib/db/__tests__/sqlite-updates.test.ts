@@ -38,4 +38,28 @@ describe('sqlite update-detection schema', () => {
 
     db.close();
   });
+
+  it('sqliteUpdatePolicies upsert then getByApp round-trips', async () => {
+    const { sqliteUpdatePolicies } = await import('../sqlite');
+    const { policy, created } = await sqliteUpdatePolicies.upsert('user-1', {
+      winget_id: 'VideoLAN.VLC',
+      tenant_id: 'tenant-1',
+      policy_type: 'notify',
+    });
+    expect(created).toBe(true);
+    expect(policy.policy_type).toBe('notify');
+
+    const found = await sqliteUpdatePolicies.getByApp('user-1', 'tenant-1', 'VideoLAN.VLC');
+    expect(found?.id).toBe(policy.id);
+
+    const { policy: updated, created: createdAgain } = await sqliteUpdatePolicies.upsert('user-1', {
+      winget_id: 'VideoLAN.VLC',
+      tenant_id: 'tenant-1',
+      policy_type: 'auto_update',
+      deployment_config: { displayName: 'VLC', publisher: 'VideoLAN', architecture: 'x64', installerType: 'wix', installCommand: 'x', uninstallCommand: 'x', installScope: 'machine', detectionRules: [] },
+    });
+    expect(createdAgain).toBe(false);
+    expect(updated.id).toBe(policy.id);
+    expect(updated.policy_type).toBe('auto_update');
+  });
 });

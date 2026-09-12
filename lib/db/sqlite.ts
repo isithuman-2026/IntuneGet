@@ -9,6 +9,7 @@ import fs from 'fs';
 import type { DatabaseAdapter, PackagingJob, UploadHistoryRecord } from './types';
 import type { WebhookConfiguration, WebhookConfigurationInput, WebhookConfigurationUpdate } from '@/types/notifications';
 import type { ClaimedApp } from '@/types/unmanaged';
+import type { AppUpdatePolicy, AppUpdatePolicyInput } from '@/types/update-policies';
 
 // Singleton database instance
 let db: Database.Database | null = null;
@@ -797,6 +798,145 @@ function parseClaimedAppRow(row: Record<string, unknown>): ClaimedApp {
     status: row.status,
   } as ClaimedApp;
 }
+
+/**
+ * Parse an app_update_policies row from SQLite into an AppUpdatePolicy
+ */
+function parseUpdatePolicyRow(row: Record<string, unknown>): AppUpdatePolicy {
+  return {
+    ...row,
+    deployment_config: row.deployment_config ? JSON.parse(row.deployment_config as string) : null,
+    is_enabled: Boolean(row.is_enabled),
+  } as unknown as AppUpdatePolicy;
+}
+
+/**
+ * SQLite-only update policy storage for automated update management.
+ * Not part of DatabaseAdapter - this is update-detection feature-specific.
+ */
+export const sqliteUpdatePolicies = {
+  async listByUser(userId: string, tenantId?: string): Promise<AppUpdatePolicy[]> {
+    const database = getDb();
+    const rows = tenantId
+      ? database.prepare('SELECT * FROM app_update_policies WHERE user_id = ? AND tenant_id = ? ORDER BY updated_at DESC').all(userId, tenantId)
+      : database.prepare('SELECT * FROM app_update_policies WHERE user_id = ? ORDER BY updated_at DESC').all(userId);
+    return (rows as Record<string, unknown>[]).map(parseUpdatePolicyRow);
+  },
+
+  async getByApp(userId: string, tenantId: string, wingetId: string): Promise<AppUpdatePolicy | null> {
+    const database = getDb();
+    const row = database
+      .prepare('SELECT * FROM app_update_policies WHERE user_id = ? AND tenant_id = ? AND winget_id = ?')
+      .get(userId, tenantId, wingetId) as Record<string, unknown> | undefined;
+    return row ? parseUpdatePolicyRow(row) : null;
+  },
+
+  async getById(id: string, userId: string): Promise<AppUpdatePolicy | null> {
+    const database = getDb();
+    const row = database
+      .prepare('SELECT * FROM app_update_policies WHERE id = ? AND user_id = ?')
+      .get(id, userId) as Record<string, unknown> | undefined;
+    return row ? parseUpdatePolicyRow(row) : null;
+  },
+
+  async upsert(
+    userId: string,
+    input: AppUpdatePolicyInput & { delay_days?: number }
+  ): Promise<{ policy: AppUpdatePolicy; created: boolean }> {
+    const database = getDb();
+    const existing = await this.getByApp(userId, input.tenant_id, input.winget_id);
+    const now = new Date().toISOString();
+
+    if (existing) {
+      database
+        .prepare(`
+          UPDATE app_update_policies
+          SET policy_type = ?, pinned_version = ?, deployment_config = ?,
+              original_upload_history_id = ?, delay_days = ?, is_enabled = ?, updated_at = ?
+          WHERE id = ?
+        `)
+        .run(
+          input.policy_type,
+          input.policy_type === 'pin_version' ? (input.pinned_version || null) : null,
+          input.deployment_config ? JSON.stringify(input.deployment_config) : null,
+          input.original_upload_history_id || null,
+          input.delay_days ?? existing.delay_days ?? 0,
+          input.is_enabled ?? true ? 1 : 0,
+          now,
+          existing.id
+        );
+      return { policy: (await this.getById(existing.id, userId)) as AppUpdatePolicy, created: false };
+    }
+
+    const id = crypto.randomUUID();
+    database
+      .prepare(`
+        INSERT INTO app_update_policies (
+          id, user_id, tenant_id, winget_id, policy_type, pinned_version,
+          deployment_config, original_upload_history_id, delay_days, is_enabled,
+          created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `)
+      .run(
+        id,
+        userId,
+        input.tenant_id,
+        input.winget_id,
+        input.policy_type,
+        input.policy_type === 'pin_version' ? (input.pinned_version || null) : null,
+        input.deployment_config ? JSON.stringify(input.deployment_config) : null,
+        input.original_upload_history_id || null,
+        input.delay_days ?? 0,
+        input.is_enabled ?? true ? 1 : 0,
+        now,
+        now
+      );
+    return { policy: (await this.getById(id, userId)) as AppUpdatePolicy, created: true };
+  },
+
+  async update(
+    id: string,
+    userId: string,
+    data: Partial<AppUpdatePolicyInput> & { delay_days?: number; is_enabled?: boolean; consecutive_failures?: number }
+  ): Promise<AppUpdatePolicy | null> {
+    const database = getDb();
+    const sets: string[] = ['updated_at = ?'];
+    const values: unknown[] = [new Date().toISOString()];
+
+    if (data.policy_type !== undefined) { sets.push('policy_type = ?'); values.push(data.policy_type); }
+    if (data.pinned_version !== undefined) { sets.push('pinned_version = ?'); values.push(data.pinned_version); }
+    if (data.deployment_config !== undefined) { sets.push('deployment_config = ?'); values.push(JSON.stringify(data.deployment_config)); }
+    if (data.original_upload_history_id !== undefined) { sets.push('original_upload_history_id = ?'); values.push(data.original_upload_history_id); }
+    if (data.delay_days !== undefined) { sets.push('delay_days = ?'); values.push(data.delay_days); }
+    if (data.is_enabled !== undefined) {
+      sets.push('is_enabled = ?');
+      values.push(data.is_enabled ? 1 : 0);
+      if (data.is_enabled === true) { sets.push('consecutive_failures = 0'); }
+    }
+
+    values.push(id, userId);
+    const result = database
+      .prepare(`UPDATE app_update_policies SET ${sets.join(', ')} WHERE id = ? AND user_id = ?`)
+      .run(...values);
+    if (result.changes === 0) return null;
+    return this.getById(id, userId);
+  },
+
+  async delete(id: string, userId: string): Promise<boolean> {
+    const database = getDb();
+    const result = database
+      .prepare('DELETE FROM app_update_policies WHERE id = ? AND user_id = ?')
+      .run(id, userId);
+    return result.changes > 0;
+  },
+
+  async incrementFailureCount(id: string): Promise<void> {
+    const database = getDb();
+    database
+      .prepare('UPDATE app_update_policies SET consecutive_failures = consecutive_failures + 1, updated_at = ? WHERE id = ?')
+      .run(new Date().toISOString(), id);
+  },
+};
 
 /**
  * SQLite-only claimed-app storage (Discovered Apps -> claim flow).
