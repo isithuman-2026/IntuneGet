@@ -25,17 +25,15 @@ interface RouteParams {
  */
 export async function GET(request: NextRequest, { params }: RouteParams) {
   try {
-    const user = await parseAccessToken(request.headers.get('Authorization'));
-    if (!user) {
-      return NextResponse.json(
-        { error: 'Authentication required' },
-        { status: 401 }
-      );
-    }
-
-    const { id } = await params;
-
     if (isSqliteMode()) {
+      const user = await parseAccessToken(request.headers.get('Authorization'));
+      if (!user) {
+        return NextResponse.json(
+          { error: 'Authentication required' },
+          { status: 401 }
+        );
+      }
+      const { id } = await params;
       const policy = await sqliteUpdatePolicies.getById(id, user.userId);
       if (!policy) return NextResponse.json({ error: 'Policy not found' }, { status: 404 });
       return NextResponse.json({ policy });
@@ -45,6 +43,15 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       return NextResponse.json({ policy: null });
     }
 
+    const user = await parseAccessToken(request.headers.get('Authorization'));
+    if (!user) {
+      return NextResponse.json(
+        { error: 'Authentication required' },
+        { status: 401 }
+      );
+    }
+
+    const { id } = await params;
     const supabase = createServerClient();
 
     // Get policy by ID, ensuring it belongs to the user
@@ -86,18 +93,17 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
  */
 export async function PATCH(request: NextRequest, { params }: RouteParams) {
   try {
-    const user = await parseAccessToken(request.headers.get('Authorization'));
-    if (!user) {
-      return NextResponse.json(
-        { error: 'Authentication required' },
-        { status: 401 }
-      );
-    }
-
     const { id } = await params;
     const body = await request.json();
 
     if (isSqliteMode()) {
+      const user = await parseAccessToken(request.headers.get('Authorization'));
+      if (!user) {
+        return NextResponse.json(
+          { error: 'Authentication required' },
+          { status: 401 }
+        );
+      }
       const existing = await sqliteUpdatePolicies.getById(id, user.userId);
       if (!existing) return NextResponse.json({ error: 'Policy not found' }, { status: 404 });
       if (body.policy_type === 'pin_version' && !body.pinned_version && !existing.pinned_version) {
@@ -121,6 +127,14 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
       return NextResponse.json(
         { error: 'Auto-update policies require hosted services' },
         { status: 503 }
+      );
+    }
+
+    const user = await parseAccessToken(request.headers.get('Authorization'));
+    if (!user) {
+      return NextResponse.json(
+        { error: 'Authentication required' },
+        { status: 401 }
       );
     }
 
@@ -223,17 +237,16 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
  */
 export async function DELETE(request: NextRequest, { params }: RouteParams) {
   try {
-    const user = await parseAccessToken(request.headers.get('Authorization'));
-    if (!user) {
-      return NextResponse.json(
-        { error: 'Authentication required' },
-        { status: 401 }
-      );
-    }
-
     const { id } = await params;
 
     if (isSqliteMode()) {
+      const user = await parseAccessToken(request.headers.get('Authorization'));
+      if (!user) {
+        return NextResponse.json(
+          { error: 'Authentication required' },
+          { status: 401 }
+        );
+      }
       const deleted = await sqliteUpdatePolicies.delete(id, user.userId);
       if (!deleted) return NextResponse.json({ error: 'Policy not found' }, { status: 404 });
       return NextResponse.json({ success: true, deleted: true });
@@ -243,6 +256,14 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
       return NextResponse.json(
         { error: 'Auto-update policies require hosted services' },
         { status: 503 }
+      );
+    }
+
+    const user = await parseAccessToken(request.headers.get('Authorization'));
+    if (!user) {
+      return NextResponse.json(
+        { error: 'Authentication required' },
+        { status: 401 }
       );
     }
 

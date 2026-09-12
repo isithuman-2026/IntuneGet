@@ -20,6 +20,24 @@ import type { Json } from '@/types/database';
  */
 export async function GET(request: NextRequest) {
   try {
+    if (isSqliteMode()) {
+      const user = await parseAccessToken(request.headers.get('Authorization'));
+      if (!user) {
+        return NextResponse.json(
+          { error: 'Authentication required' },
+          { status: 401 }
+        );
+      }
+      const searchParams = request.nextUrl.searchParams;
+      const tenantId = searchParams.get('tenant_id');
+      const policies = await sqliteUpdatePolicies.listByUser(user.userId, tenantId || undefined);
+      return NextResponse.json({ policies, count: policies.length });
+    }
+
+    if (!isSupabaseServerConfigured()) {
+      return NextResponse.json({ policies: [], count: 0 });
+    }
+
     const user = await parseAccessToken(request.headers.get('Authorization'));
     if (!user) {
       return NextResponse.json(
@@ -30,15 +48,6 @@ export async function GET(request: NextRequest) {
 
     const searchParams = request.nextUrl.searchParams;
     const tenantId = searchParams.get('tenant_id');
-
-    if (isSqliteMode()) {
-      const policies = await sqliteUpdatePolicies.listByUser(user.userId, tenantId || undefined);
-      return NextResponse.json({ policies, count: policies.length });
-    }
-
-    if (!isSupabaseServerConfigured()) {
-      return NextResponse.json({ policies: [], count: 0 });
-    }
 
     const supabase = createServerClient();
 
@@ -81,34 +90,34 @@ export async function GET(request: NextRequest) {
  */
 export async function POST(request: NextRequest) {
   try {
-    const user = await parseAccessToken(request.headers.get('Authorization'));
-    if (!user) {
-      return NextResponse.json(
-        { error: 'Authentication required' },
-        { status: 401 }
-      );
-    }
-
     const body: AppUpdatePolicyInput = await request.json();
 
-    // Validate required fields
-    if (!body.winget_id || !body.tenant_id || !body.policy_type) {
-      return NextResponse.json(
-        { error: 'Missing required fields: winget_id, tenant_id, policy_type' },
-        { status: 400 }
-      );
-    }
-
-    // Validate policy type
-    const validPolicyTypes = ['auto_update', 'notify', 'ignore', 'pin_version'];
-    if (!validPolicyTypes.includes(body.policy_type)) {
-      return NextResponse.json(
-        { error: `Invalid policy_type. Must be one of: ${validPolicyTypes.join(', ')}` },
-        { status: 400 }
-      );
-    }
-
     if (isSqliteMode()) {
+      const user = await parseAccessToken(request.headers.get('Authorization'));
+      if (!user) {
+        return NextResponse.json(
+          { error: 'Authentication required' },
+          { status: 401 }
+        );
+      }
+
+      // Validate required fields
+      if (!body.winget_id || !body.tenant_id || !body.policy_type) {
+        return NextResponse.json(
+          { error: 'Missing required fields: winget_id, tenant_id, policy_type' },
+          { status: 400 }
+        );
+      }
+
+      // Validate policy type
+      const validPolicyTypes = ['auto_update', 'notify', 'ignore', 'pin_version'];
+      if (!validPolicyTypes.includes(body.policy_type)) {
+        return NextResponse.json(
+          { error: `Invalid policy_type. Must be one of: ${validPolicyTypes.join(', ')}` },
+          { status: 400 }
+        );
+      }
+
       let derivedPinnedVersion = body.pinned_version || null;
       let derivedDeploymentConfig: DeploymentConfig | null = body.deployment_config || null;
       let derivedOriginalUploadHistoryId = body.original_upload_history_id || null;
@@ -162,6 +171,31 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(
         { error: 'Auto-update policies require hosted services' },
         { status: 503 }
+      );
+    }
+
+    const user = await parseAccessToken(request.headers.get('Authorization'));
+    if (!user) {
+      return NextResponse.json(
+        { error: 'Authentication required' },
+        { status: 401 }
+      );
+    }
+
+    // Validate required fields
+    if (!body.winget_id || !body.tenant_id || !body.policy_type) {
+      return NextResponse.json(
+        { error: 'Missing required fields: winget_id, tenant_id, policy_type' },
+        { status: 400 }
+      );
+    }
+
+    // Validate policy type
+    const validPolicyTypes = ['auto_update', 'notify', 'ignore', 'pin_version'];
+    if (!validPolicyTypes.includes(body.policy_type)) {
+      return NextResponse.json(
+        { error: `Invalid policy_type. Must be one of: ${validPolicyTypes.join(', ')}` },
+        { status: 400 }
       );
     }
 
