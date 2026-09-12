@@ -21,7 +21,7 @@ import { useMicrosoftAuth } from '@/hooks/useMicrosoftAuth';
 import { AdminConsentBanner } from '@/components/AdminConsentBanner';
 import { FilterPermissionNudge } from '@/components/FilterPermissionNudge';
 import { useDashboardStats } from '@/hooks/useAnalytics';
-import { useOnboardingStatus } from '@/hooks/useOnboardingStatus';
+import { useOnboardingStatusContext } from '@/components/providers/OnboardingStatusProvider';
 import { RecentActivityList, PageHeader } from '@/components/dashboard';
 import { useUserSettings } from '@/components/providers/UserSettingsProvider';
 import { T, Var } from 'gt-next';
@@ -36,7 +36,7 @@ function getTimeBasedGreeting(): React.ReactNode {
 export default function DashboardPage() {
   const { user } = useMicrosoftAuth();
   const { data: stats, isLoading: statsLoading } = useDashboardStats();
-  const { errorType } = useOnboardingStatus();
+  const { errorType } = useOnboardingStatusContext();
   const { settings, setQuickStartDismissed } = useUserSettings();
   const [mounted, setMounted] = useState(false);
   const [greeting, setGreeting] = useState<React.ReactNode>(<T>Welcome back</T>);

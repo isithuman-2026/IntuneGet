@@ -1,7 +1,7 @@
 "use client";
 
 import { useMsal, useIsAuthenticated } from "@azure/msal-react";
-import { InteractionRequiredAuthError, AccountInfo } from "@azure/msal-browser";
+import { AccountInfo } from "@azure/msal-browser";
 import { graphScopes, getAdminConsentUrl } from "@/lib/msal-config";
 import { useCallback, useRef, useEffect, useState } from "react";
 import { isTokenExpiringSoon, getTokenExpiryMinutes } from "@/lib/token-utils";
@@ -66,23 +66,26 @@ export function useMicrosoftAuth() {
       tokenExpiryRef.current = tokenResponse.expiresOn?.getTime() || null;
 
       return tokenResponse.accessToken;
-    } catch (error) {
-      if (error instanceof InteractionRequiredAuthError) {
-        try {
-          const tokenResponse = await instance.acquireTokenPopup({
-            scopes: graphScopes,
-            account,
-          });
+    } catch {
+      // Any acquireTokenSilent failure (InteractionRequiredAuthError, or a
+      // partitioned/blocked prompt=none iframe throwing a different
+      // BrowserAuthError under Firefox Total Cookie Protection / Safari ITP)
+      // needs the same interactive fallback - only InteractionRequiredAuthError
+      // was handled before, leaving the partitioned-iframe case to silently
+      // return null with no popup attempt.
+      try {
+        const tokenResponse = await instance.acquireTokenPopup({
+          scopes: graphScopes,
+          account,
+        });
 
-          cachedTokenRef.current = tokenResponse.accessToken;
-          tokenExpiryRef.current = tokenResponse.expiresOn?.getTime() || null;
+        cachedTokenRef.current = tokenResponse.accessToken;
+        tokenExpiryRef.current = tokenResponse.expiresOn?.getTime() || null;
 
-          return tokenResponse.accessToken;
-        } catch {
-          return null;
-        }
+        return tokenResponse.accessToken;
+      } catch {
+        return null;
       }
-      return null;
     }
   }, [instance, accounts]);
 
@@ -114,23 +117,22 @@ export function useMicrosoftAuth() {
       tokenExpiryRef.current = tokenResponse.expiresOn?.getTime() || null;
 
       return tokenResponse.accessToken;
-    } catch (error) {
-      if (error instanceof InteractionRequiredAuthError) {
-        try {
-          const tokenResponse = await instance.acquireTokenPopup({
-            scopes: graphScopes,
-            account,
-          });
+    } catch {
+      // See refreshToken above: fall back to popup on any silent-acquire
+      // failure, not just InteractionRequiredAuthError.
+      try {
+        const tokenResponse = await instance.acquireTokenPopup({
+          scopes: graphScopes,
+          account,
+        });
 
-          cachedTokenRef.current = tokenResponse.accessToken;
-          tokenExpiryRef.current = tokenResponse.expiresOn?.getTime() || null;
+        cachedTokenRef.current = tokenResponse.accessToken;
+        tokenExpiryRef.current = tokenResponse.expiresOn?.getTime() || null;
 
-          return tokenResponse.accessToken;
-        } catch {
-          return null;
-        }
+        return tokenResponse.accessToken;
+      } catch {
+        return null;
       }
-      return null;
     }
   }, [instance, accounts, refreshToken]);
 

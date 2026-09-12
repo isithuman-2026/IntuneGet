@@ -16,7 +16,7 @@ import { useCartStore } from '@/stores/cart-store';
 import { useSidebarStore } from '@/stores/sidebar-store';
 import { useProfileStore } from '@/stores/profile-store';
 import { useMicrosoftAuth } from '@/hooks/useMicrosoftAuth';
-import { useOnboardingStatus } from '@/hooks/useOnboardingStatus';
+import { OnboardingStatusProvider, useOnboardingStatusContext } from '@/components/providers/OnboardingStatusProvider';
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
 import { TenantSwitcher } from '@/components/msp';
 import { UploadCart } from '@/components/UploadCart';
@@ -31,13 +31,25 @@ export default function DashboardLayout({
 }: {
   children: React.ReactNode;
 }) {
+  return (
+    <OnboardingStatusProvider>
+      <DashboardLayoutInner>{children}</DashboardLayoutInner>
+    </OnboardingStatusProvider>
+  );
+}
+
+function DashboardLayoutInner({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
   const { isAuthenticated, isSigningOut, user, signOut, getAccessToken } = useMicrosoftAuth();
   const {
     isOnboardingComplete,
     isChecking: isCheckingOnboarding,
     errorType,
     retryVerification,
-  } = useOnboardingStatus();
+  } = useOnboardingStatusContext();
   const router = useRouter();
   const isCollapsed = useSidebarStore((state) => state.isCollapsed);
   const fetchProfileImage = useProfileStore((state) => state.fetchProfileImage);

@@ -18,6 +18,9 @@
 
 # misc
 .DS_Store
+
+# graphify knowledge-graph output (local dev tooling)
+/graphify-out/
 *.pem
 *.key
 
