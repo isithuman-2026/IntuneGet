@@ -96,4 +96,17 @@ describe('sqlite update-detection schema', () => {
     const recent = await sqliteAutoUpdateHistory.hasRecentForPolicy(policy.id, new Date(Date.now() - 3600_000).toISOString());
     expect(recent).toBe(true);
   });
+
+  it('sqliteNotificationPreferences get returns null then upsert creates defaults-merged row', async () => {
+    const { sqliteNotificationPreferences } = await import('../sqlite');
+    expect(await sqliteNotificationPreferences.get('user-3')).toBeNull();
+
+    const created = await sqliteNotificationPreferences.upsert('user-3', { email_enabled: true, notify_on_deployed: false });
+    expect(created.email_enabled).toBe(true);
+    expect(created.notify_on_deployed).toBe(false);
+    expect(created.notify_on_error).toBe(true); // default preserved
+
+    const fetched = await sqliteNotificationPreferences.get('user-3');
+    expect(fetched?.email_enabled).toBe(true);
+  });
 });

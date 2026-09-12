@@ -11,6 +11,21 @@ import type { WebhookConfiguration, WebhookConfigurationInput, WebhookConfigurat
 import type { ClaimedApp } from '@/types/unmanaged';
 import type { AppUpdatePolicy, AppUpdatePolicyInput } from '@/types/update-policies';
 
+export interface NotificationPreferencesRow {
+  id: string;
+  user_id: string;
+  email_enabled: boolean;
+  email_frequency: 'immediate' | 'daily' | 'weekly';
+  email_address: string | null;
+  notify_critical_only: boolean;
+  webhook_enabled: boolean;
+  notify_on_update_available: boolean;
+  notify_on_deployed: boolean;
+  notify_on_error: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
 // Singleton database instance
 let db: Database.Database | null = null;
 
@@ -1209,6 +1224,80 @@ export const sqliteClaims = {
 
     const row = database.prepare('SELECT * FROM claimed_apps WHERE id = ?').get(claimId) as Record<string, unknown> | undefined;
     return row ? parseClaimedAppRow(row) : null;
+  },
+};
+
+/**
+ * Parse a notification_preferences row from SQLite into a NotificationPreferencesRow
+ */
+function parseNotificationPreferencesRow(row: Record<string, unknown>): NotificationPreferencesRow {
+  return {
+    ...row,
+    email_enabled: Boolean(row.email_enabled),
+    notify_critical_only: Boolean(row.notify_critical_only),
+    webhook_enabled: Boolean(row.webhook_enabled),
+    notify_on_update_available: Boolean(row.notify_on_update_available),
+    notify_on_deployed: Boolean(row.notify_on_deployed),
+    notify_on_error: Boolean(row.notify_on_error),
+  } as NotificationPreferencesRow;
+}
+
+/**
+ * SQLite-only notification preferences storage.
+ * Handles user notification settings and preferences.
+ */
+export const sqliteNotificationPreferences = {
+  async get(userId: string): Promise<NotificationPreferencesRow | null> {
+    const database = getDb();
+    const row = database
+      .prepare('SELECT * FROM notification_preferences WHERE user_id = ?')
+      .get(userId) as Record<string, unknown> | undefined;
+    return row ? parseNotificationPreferencesRow(row) : null;
+  },
+
+  async upsert(userId: string, data: Partial<NotificationPreferencesRow>): Promise<NotificationPreferencesRow> {
+    const database = getDb();
+    const existing = await this.get(userId);
+    const now = new Date().toISOString();
+
+    if (existing) {
+      const sets: string[] = ['updated_at = ?'];
+      const values: unknown[] = [now];
+      const boolFields = ['email_enabled', 'notify_critical_only', 'webhook_enabled', 'notify_on_update_available', 'notify_on_deployed', 'notify_on_error'] as const;
+      const textFields = ['email_frequency', 'email_address'] as const;
+      for (const f of boolFields) {
+        if (data[f] !== undefined) { sets.push(`${f} = ?`); values.push(data[f] ? 1 : 0); }
+      }
+      for (const f of textFields) {
+        if (data[f] !== undefined) { sets.push(`${f} = ?`); values.push(data[f]); }
+      }
+      values.push(userId);
+      database.prepare(`UPDATE notification_preferences SET ${sets.join(', ')} WHERE user_id = ?`).run(...values);
+      return (await this.get(userId)) as NotificationPreferencesRow;
+    }
+
+    const id = crypto.randomUUID();
+    database
+      .prepare(`
+        INSERT INTO notification_preferences (
+          id, user_id, email_enabled, email_frequency, email_address, notify_critical_only,
+          webhook_enabled, notify_on_update_available, notify_on_deployed, notify_on_error,
+          created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `)
+      .run(
+        id, userId,
+        data.email_enabled ? 1 : 0,
+        data.email_frequency || 'daily',
+        data.email_address ?? null,
+        data.notify_critical_only ? 1 : 0,
+        data.webhook_enabled === undefined ? 1 : (data.webhook_enabled ? 1 : 0),
+        data.notify_on_update_available === undefined ? 1 : (data.notify_on_update_available ? 1 : 0),
+        data.notify_on_deployed === undefined ? 1 : (data.notify_on_deployed ? 1 : 0),
+        data.notify_on_error === undefined ? 1 : (data.notify_on_error ? 1 : 0),
+        now, now
+      );
+    return (await this.get(userId)) as NotificationPreferencesRow;
   },
 };
 
