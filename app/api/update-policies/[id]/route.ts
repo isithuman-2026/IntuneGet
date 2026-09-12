@@ -7,6 +7,8 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient, isSupabaseServerConfigured } from '@/lib/supabase';
+import { isSqliteMode } from '@/lib/db';
+import { sqliteUpdatePolicies } from '@/lib/db/sqlite';
 import { parseAccessToken } from '@/lib/auth-utils';
 import type { AppUpdatePolicy, UpdatePolicyType } from '@/types/update-policies';
 import type { Database } from '@/types/database';
@@ -23,10 +25,6 @@ interface RouteParams {
  */
 export async function GET(request: NextRequest, { params }: RouteParams) {
   try {
-    if (!isSupabaseServerConfigured()) {
-      return NextResponse.json({ policy: null });
-    }
-
     const user = await parseAccessToken(request.headers.get('Authorization'));
     if (!user) {
       return NextResponse.json(
@@ -36,6 +34,17 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     }
 
     const { id } = await params;
+
+    if (isSqliteMode()) {
+      const policy = await sqliteUpdatePolicies.getById(id, user.userId);
+      if (!policy) return NextResponse.json({ error: 'Policy not found' }, { status: 404 });
+      return NextResponse.json({ policy });
+    }
+
+    if (!isSupabaseServerConfigured()) {
+      return NextResponse.json({ policy: null });
+    }
+
     const supabase = createServerClient();
 
     // Get policy by ID, ensuring it belongs to the user
@@ -77,13 +86,6 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
  */
 export async function PATCH(request: NextRequest, { params }: RouteParams) {
   try {
-    if (!isSupabaseServerConfigured()) {
-      return NextResponse.json(
-        { error: 'Auto-update policies require hosted services' },
-        { status: 503 }
-      );
-    }
-
     const user = await parseAccessToken(request.headers.get('Authorization'));
     if (!user) {
       return NextResponse.json(
@@ -94,6 +96,33 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
 
     const { id } = await params;
     const body = await request.json();
+
+    if (isSqliteMode()) {
+      const existing = await sqliteUpdatePolicies.getById(id, user.userId);
+      if (!existing) return NextResponse.json({ error: 'Policy not found' }, { status: 404 });
+      if (body.policy_type === 'pin_version' && !body.pinned_version && !existing.pinned_version) {
+        return NextResponse.json({ error: 'pinned_version is required for pin_version policy' }, { status: 400 });
+      }
+      if (body.policy_type === 'auto_update' && !body.deployment_config && !existing.deployment_config) {
+        return NextResponse.json({ error: 'deployment_config is required for auto_update policy' }, { status: 400 });
+      }
+      const updated = await sqliteUpdatePolicies.update(id, user.userId, {
+        policy_type: body.policy_type,
+        pinned_version: body.pinned_version,
+        deployment_config: body.deployment_config,
+        original_upload_history_id: body.original_upload_history_id,
+        is_enabled: body.is_enabled,
+        delay_days: body.delay_days,
+      });
+      return NextResponse.json({ policy: updated });
+    }
+
+    if (!isSupabaseServerConfigured()) {
+      return NextResponse.json(
+        { error: 'Auto-update policies require hosted services' },
+        { status: 503 }
+      );
+    }
 
     const supabase = createServerClient();
 
@@ -194,13 +223,6 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
  */
 export async function DELETE(request: NextRequest, { params }: RouteParams) {
   try {
-    if (!isSupabaseServerConfigured()) {
-      return NextResponse.json(
-        { error: 'Auto-update policies require hosted services' },
-        { status: 503 }
-      );
-    }
-
     const user = await parseAccessToken(request.headers.get('Authorization'));
     if (!user) {
       return NextResponse.json(
@@ -210,6 +232,20 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
     }
 
     const { id } = await params;
+
+    if (isSqliteMode()) {
+      const deleted = await sqliteUpdatePolicies.delete(id, user.userId);
+      if (!deleted) return NextResponse.json({ error: 'Policy not found' }, { status: 404 });
+      return NextResponse.json({ success: true, deleted: true });
+    }
+
+    if (!isSupabaseServerConfigured()) {
+      return NextResponse.json(
+        { error: 'Auto-update policies require hosted services' },
+        { status: 503 }
+      );
+    }
+
     const supabase = createServerClient();
 
     // Delete the policy (only if it belongs to the user)

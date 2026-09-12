@@ -25,6 +25,7 @@ vi.mock('@/lib/supabase', () => ({
 
 vi.mock('@/lib/db', () => ({
   getDatabase: getDatabaseMock,
+  isSqliteMode: () => false,
 }));
 
 vi.mock('@/lib/catalog', () => ({

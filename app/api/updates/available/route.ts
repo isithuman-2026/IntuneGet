@@ -5,6 +5,8 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient, isSupabaseServerConfigured } from '@/lib/supabase';
+import { isSqliteMode } from '@/lib/db';
+import { sqliteUpdateChecks, sqliteUpdatePolicies } from '@/lib/db/sqlite';
 import { parseAccessToken } from '@/lib/auth-utils';
 import { compareVersions } from '@/lib/version-compare';
 import type { AvailableUpdate } from '@/types/update-policies';
@@ -30,6 +32,28 @@ export async function GET(request: NextRequest) {
     // By default only surface updates for IntuneGet-managed apps; fuzzy-matched
     // apps are opt-in to avoid accidentally updating mismatched/customized apps.
     const includeUnmanaged = searchParams.get('include_unmanaged') === 'true';
+
+    if (isSqliteMode()) {
+      const rows = await sqliteUpdateChecks.listByUser(user.userId, { tenantId: tenantId || undefined, includeDismissed, criticalOnly });
+      const policies = await sqliteUpdatePolicies.listByUser(user.userId, tenantId || undefined);
+      const policyMap = new Map(policies.map((p) => [`${p.winget_id}:${p.tenant_id}`, {
+        id: p.id, policy_type: p.policy_type, is_enabled: p.is_enabled, pinned_version: p.pinned_version,
+        last_auto_update_at: p.last_auto_update_at, last_auto_update_version: p.last_auto_update_version,
+        consecutive_failures: p.consecutive_failures,
+      }]));
+      const updatesWithPolicies: AvailableUpdate[] = rows
+        .map((update) => ({
+          ...update,
+          has_prior_deployment: true, // every update_check_results row in SQLite mode was built from upload_history
+          policy: policyMap.get(`${update.winget_id}:${update.tenant_id}`) || null,
+        }))
+        .filter((u) => u.current_version !== 'Unknown')
+        .filter((u) => compareVersions(u.current_version, u.latest_version) < 0)
+        .filter((u) => u.policy?.last_auto_update_version !== u.latest_version)
+        .filter((u) => includeUnmanaged || u.is_managed);
+      const criticalCount = updatesWithPolicies.filter((u) => u.is_critical).length;
+      return NextResponse.json({ updates: updatesWithPolicies, count: updatesWithPolicies.length, criticalCount });
+    }
 
     if (!isSupabaseServerConfigured()) {
       return NextResponse.json({
@@ -192,6 +216,11 @@ export async function PATCH(request: NextRequest) {
         { error: 'action must be "dismiss" or "restore"' },
         { status: 400 }
       );
+    }
+
+    if (isSqliteMode()) {
+      const updated = await sqliteUpdateChecks.dismiss(user.userId, update_ids, action === 'dismiss');
+      return NextResponse.json({ success: true, updated, action });
     }
 
     if (!isSupabaseServerConfigured()) {
