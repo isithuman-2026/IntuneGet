@@ -6,6 +6,8 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient, isSupabaseServerConfigured } from '@/lib/supabase';
+import { isSqliteMode } from '@/lib/db';
+import { sqliteNotificationPreferences } from '@/lib/db/sqlite';
 import { parseAccessToken } from '@/lib/auth-utils';
 import { sendTestEmail, isEmailConfigured } from '@/lib/email/service';
 import type {
@@ -29,6 +31,24 @@ export async function GET(request: NextRequest) {
         { error: 'Authentication required' },
         { status: 401 }
       );
+    }
+
+    if (isSqliteMode()) {
+      const prefs = await sqliteNotificationPreferences.get(user.userId);
+      return NextResponse.json({
+        preferences: prefs || {
+          user_id: user.userId,
+          email_enabled: false,
+          email_frequency: 'daily',
+          email_address: null,
+          notify_critical_only: false,
+          webhook_enabled: true,
+          notify_on_update_available: true,
+          notify_on_deployed: true,
+          notify_on_error: true,
+        },
+        isEmailConfigured: isEmailConfigured(),
+      });
     }
 
     if (!isSupabaseServerConfigured()) {
@@ -93,13 +113,6 @@ export async function GET(request: NextRequest) {
  */
 export async function PUT(request: NextRequest) {
   try {
-    if (!isSupabaseServerConfigured()) {
-      return NextResponse.json(
-        { error: 'Notification preferences require hosted services' },
-        { status: 503 }
-      );
-    }
-
     const user = await parseAccessToken(request.headers.get('Authorization'));
     if (!user) {
       return NextResponse.json(
@@ -132,6 +145,40 @@ export async function PUT(request: NextRequest) {
           { status: 400 }
         );
       }
+    }
+
+    if (isSqliteMode()) {
+      const updated = await sqliteNotificationPreferences.upsert(user.userId, {
+        email_enabled: body.email_enabled,
+        email_frequency: body.email_frequency as 'immediate' | 'daily' | 'weekly' | undefined,
+        email_address: body.email_address || (user.userEmail && user.userEmail !== 'unknown' ? user.userEmail : null),
+        notify_critical_only: body.notify_critical_only,
+        webhook_enabled: body.webhook_enabled,
+        notify_on_update_available: body.notify_on_update_available,
+        notify_on_deployed: body.notify_on_deployed,
+        notify_on_error: body.notify_on_error,
+      });
+
+      let testEmailResult = null;
+      if (body.sendTestEmail && body.email_enabled) {
+        const emailAddress = body.email_address || user.userEmail;
+        if (emailAddress && isEmailConfigured()) {
+          testEmailResult = await sendTestEmail(emailAddress);
+        }
+      }
+
+      return NextResponse.json({
+        preferences: updated,
+        testEmailSent: testEmailResult?.success ?? false,
+        testEmailError: testEmailResult?.error,
+      });
+    }
+
+    if (!isSupabaseServerConfigured()) {
+      return NextResponse.json(
+        { error: 'Notification preferences require hosted services' },
+        { status: 503 }
+      );
     }
 
     const supabase = createServerClient();

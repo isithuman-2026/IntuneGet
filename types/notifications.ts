@@ -34,6 +34,10 @@ export interface NotificationPreferencesInput {
   email_frequency?: EmailFrequency;
   email_address?: string | null;
   notify_critical_only?: boolean;
+  webhook_enabled?: boolean;
+  notify_on_update_available?: boolean;
+  notify_on_deployed?: boolean;
+  notify_on_error?: boolean;
 }
 
 /**
