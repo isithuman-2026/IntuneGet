@@ -30,11 +30,20 @@ export function NotificationSettings({ className }: NotificationSettingsProps) {
   const [success, setSuccess] = useState<string | null>(null);
   const [isEmailConfigured, setIsEmailConfigured] = useState(false);
 
-  const [preferences, setPreferences] = useState<Partial<NotificationPreferences>>({
+  const [preferences, setPreferences] = useState<Partial<NotificationPreferences> & {
+    webhook_enabled?: boolean;
+    notify_on_update_available?: boolean;
+    notify_on_deployed?: boolean;
+    notify_on_error?: boolean;
+  }>({
     email_enabled: false,
     email_frequency: 'daily',
     email_address: null,
     notify_critical_only: false,
+    webhook_enabled: true,
+    notify_on_update_available: true,
+    notify_on_deployed: true,
+    notify_on_error: true,
   });
 
   // Fetch current preferences
@@ -267,6 +276,65 @@ export function NotificationSettings({ className }: NotificationSettingsProps) {
               "after:shadow-sm"
             )} />
           </label>
+        </div>
+
+        {/* Webhook toggle */}
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-text-primary font-medium">Enable Webhook Notifications</p>
+            <p className="text-sm text-text-secondary">Send alerts to your configured Discord/Slack/Teams webhooks</p>
+          </div>
+          <label className="relative inline-flex items-center cursor-pointer">
+            <input
+              type="checkbox"
+              checked={preferences.webhook_enabled ?? true}
+              onChange={(e) => setPreferences({ ...preferences, webhook_enabled: e.target.checked })}
+              className="sr-only peer"
+            />
+            <div className={cn(
+              "w-11 h-6 rounded-full transition-colors",
+              "bg-overlay/10 peer-checked:bg-accent-cyan",
+              "peer-focus:ring-2 peer-focus:ring-accent-cyan/20",
+              "after:content-[''] after:absolute after:top-[2px] after:left-[2px]",
+              "after:bg-white after:rounded-full after:h-5 after:w-5",
+              "after:transition-transform peer-checked:after:translate-x-5",
+              "after:shadow-sm"
+            )} />
+          </label>
+        </div>
+
+        {/* Event type checkboxes */}
+        <div className="space-y-3">
+          <p className="text-text-primary font-medium">Notify me about</p>
+          {([
+            { key: 'notify_on_update_available' as const, label: 'Update available', description: 'A newer version was detected for a deployed app' },
+            { key: 'notify_on_deployed' as const, label: 'Deployed', description: 'An auto-update finished deploying to Intune' },
+            { key: 'notify_on_error' as const, label: 'Errors', description: 'An auto-update failed' },
+          ]).map(({ key, label, description }) => (
+            <div key={key} className="flex items-center justify-between pl-2">
+              <div>
+                <p className="text-text-primary text-sm">{label}</p>
+                <p className="text-xs text-text-secondary">{description}</p>
+              </div>
+              <label className="relative inline-flex items-center cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={preferences[key] ?? true}
+                  onChange={(e) => setPreferences({ ...preferences, [key]: e.target.checked })}
+                  className="sr-only peer"
+                />
+                <div className={cn(
+                  "w-11 h-6 rounded-full transition-colors",
+                  "bg-overlay/10 peer-checked:bg-accent-cyan",
+                  "peer-focus:ring-2 peer-focus:ring-accent-cyan/20",
+                  "after:content-[''] after:absolute after:top-[2px] after:left-[2px]",
+                  "after:bg-white after:rounded-full after:h-5 after:w-5",
+                  "after:transition-transform peer-checked:after:translate-x-5",
+                  "after:shadow-sm"
+                )} />
+              </label>
+            </div>
+          ))}
         </div>
 
         {/* Status messages */}
