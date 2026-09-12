@@ -779,6 +779,24 @@ export const sqliteClaims = {
     return (await this.getByTenantAndDiscoveredId(params.tenantId, params.discoveredAppId)) as ClaimedApp;
   },
 
+  /**
+   * Mark any pending claim(s) for this tenant + winget package as deployed,
+   * once a packaging job for that package reaches a terminal success state
+   * (deployed, or duplicate_skipped - the app is already in Intune either
+   * way). Called from the package callback route, not the claim route.
+   */
+  async markDeployedByWingetPackage(tenantId: string, wingetPackageId: string, intuneAppId: string | null): Promise<number> {
+    const database = getDb();
+    const result = database
+      .prepare(`
+        UPDATE claimed_apps
+        SET status = 'deployed', intune_app_id = COALESCE(?, intune_app_id)
+        WHERE tenant_id = ? AND winget_package_id = ? AND status = 'pending'
+      `)
+      .run(intuneAppId, tenantId, wingetPackageId);
+    return result.changes;
+  },
+
   async updateStatus(claimId: string, tenantId: string, updates: { status?: string; intuneAppId?: string }): Promise<ClaimedApp | null> {
     const database = getDb();
     const sets: string[] = [];

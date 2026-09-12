@@ -5,7 +5,9 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { getDatabase } from '@/lib/db';
+import { getDatabase, isSqliteMode } from '@/lib/db';
+import { sqliteClaims } from '@/lib/db/sqlite';
+import { createServerClient, isSupabaseServerConfigured } from '@/lib/supabase';
 import { verifyCallbackSignature } from '@/lib/callback-signature';
 import { onJobCompleted } from '@/lib/msp/batch-orchestrator';
 import { handleAutoUpdateJobCompletion } from '@/lib/auto-update/cleanup';
@@ -211,6 +213,29 @@ export async function POST(request: NextRequest) {
         if (policyResult.status !== 'saved') {
           console.warn(`[Callback] Update policy not saved for ${data.jobId}:`, policyResult);
         }
+      }
+    }
+
+    // Mark any pending "claimed" discovered-app record for this package as
+    // deployed - the app is now in Intune either way, whether this job
+    // uploaded it fresh or found and skipped an existing duplicate. Nothing
+    // else in the app calls the claim PATCH endpoint, so without this a
+    // claimed app never leaves the Discovered Apps "Claim" state.
+    if ((data.status === 'deployed' || data.status === 'duplicate_skipped') && currentJob.tenant_id) {
+      try {
+        if (isSqliteMode()) {
+          await sqliteClaims.markDeployedByWingetPackage(currentJob.tenant_id, currentJob.winget_id, data.intuneAppId ?? null);
+        } else if (isSupabaseServerConfigured()) {
+          const supabase = createServerClient();
+          await supabase
+            .from('claimed_apps')
+            .update({ status: 'deployed', ...(data.intuneAppId ? { intune_app_id: data.intuneAppId } : {}) })
+            .eq('tenant_id', currentJob.tenant_id)
+            .eq('winget_package_id', currentJob.winget_id)
+            .eq('status', 'pending');
+        }
+      } catch (claimSyncError) {
+        console.error(`[Callback] Failed to sync claim status for ${data.jobId}:`, claimSyncError);
       }
     }
 
