@@ -6,6 +6,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient, isSupabaseServerConfigured } from '@/lib/supabase';
 import { parseAccessToken } from '@/lib/auth-utils';
+import { isSqliteMode } from '@/lib/db';
+import { sqliteAutoUpdateHistory } from '@/lib/db/sqlite';
 import type { AutoUpdateHistoryWithPolicy } from '@/types/update-policies';
 
 interface AutoUpdateHistoryRow {
@@ -49,6 +51,17 @@ export async function GET(request: NextRequest) {
     const status = searchParams.get('status');
     const limit = Math.min(parseInt(searchParams.get('limit') || '50', 10), 100);
     const offset = parseInt(searchParams.get('offset') || '0', 10);
+
+    if (isSqliteMode()) {
+      const history = await sqliteAutoUpdateHistory.listByUser(user.userId, {
+        tenantId: tenantId || undefined,
+        wingetId: wingetId || undefined,
+        status: status && ['pending', 'packaging', 'deploying', 'completed', 'failed', 'cancelled'].includes(status) ? status : undefined,
+        limit,
+        offset,
+      });
+      return NextResponse.json({ history, count: history.length, hasMore: history.length === limit });
+    }
 
     if (!isSupabaseServerConfigured()) {
       return NextResponse.json({

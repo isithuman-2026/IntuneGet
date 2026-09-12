@@ -1143,6 +1143,68 @@ export const sqliteAutoUpdateHistory = {
       .get(policyId, sinceIso);
     return Boolean(row);
   },
+
+  async listByUser(
+    userId: string,
+    opts: { tenantId?: string; wingetId?: string; status?: string; limit: number; offset: number }
+  ): Promise<Array<{
+    id: string; policy_id: string; packaging_job_id: string | null; from_version: string;
+    to_version: string; update_type: string; status: string; error_message: string | null;
+    triggered_at: string; completed_at: string | null;
+    policy: { winget_id: string; tenant_id: string }; display_name?: string;
+  }>> {
+    const database = getDb();
+    const policyConditions = ['user_id = ?'];
+    const policyValues: unknown[] = [userId];
+    if (opts.tenantId) { policyConditions.push('tenant_id = ?'); policyValues.push(opts.tenantId); }
+    if (opts.wingetId) { policyConditions.push('winget_id = ?'); policyValues.push(opts.wingetId); }
+    const policies = database
+      .prepare(`SELECT id, winget_id, tenant_id FROM app_update_policies WHERE ${policyConditions.join(' AND ')}`)
+      .all(...policyValues) as Array<{ id: string; winget_id: string; tenant_id: string }>;
+
+    if (policies.length === 0) return [];
+    const policyMap = new Map(policies.map((p) => [p.id, p]));
+    const policyIds = policies.map((p) => p.id);
+    const placeholders = policyIds.map(() => '?').join(', ');
+
+    const statusClause = opts.status ? 'AND status = ?' : '';
+    const rows = database
+      .prepare(`
+        SELECT * FROM auto_update_history
+        WHERE policy_id IN (${placeholders}) ${statusClause}
+        ORDER BY triggered_at DESC
+        LIMIT ? OFFSET ?
+      `)
+      .all(...policyIds, ...(opts.status ? [opts.status] : []), opts.limit, opts.offset) as Array<Record<string, unknown>>;
+
+    const jobIds = rows.map((r) => r.packaging_job_id).filter((id): id is string => typeof id === 'string');
+    const jobNames = new Map<string, string>();
+    if (jobIds.length > 0) {
+      const jobPlaceholders = jobIds.map(() => '?').join(', ');
+      const jobs = database
+        .prepare(`SELECT id, display_name FROM packaging_jobs WHERE id IN (${jobPlaceholders})`)
+        .all(...jobIds) as Array<{ id: string; display_name: string }>;
+      jobs.forEach((j) => jobNames.set(j.id, j.display_name));
+    }
+
+    return rows.map((r) => {
+      const policy = policyMap.get(r.policy_id as string)!;
+      return {
+        id: r.id as string,
+        policy_id: r.policy_id as string,
+        packaging_job_id: r.packaging_job_id as string | null,
+        from_version: r.from_version as string,
+        to_version: r.to_version as string,
+        update_type: r.update_type as string,
+        status: r.status as string,
+        error_message: r.error_message as string | null,
+        triggered_at: r.triggered_at as string,
+        completed_at: r.completed_at as string | null,
+        policy: { winget_id: policy.winget_id, tenant_id: policy.tenant_id },
+        display_name: r.packaging_job_id ? jobNames.get(r.packaging_job_id as string) : undefined,
+      };
+    });
+  },
 };
 
 /**

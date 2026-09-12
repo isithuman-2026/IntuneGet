@@ -97,6 +97,35 @@ describe('sqlite update-detection schema', () => {
     expect(recent).toBe(true);
   });
 
+  it('sqliteAutoUpdateHistory listByUser joins policy + packaging job and applies filters', async () => {
+    const { sqliteUpdatePolicies, sqliteAutoUpdateHistory, sqliteDb } = await import('../sqlite');
+    const { policy } = await sqliteUpdatePolicies.upsert('user-4', {
+      winget_id: 'Notepad++.Notepad++', tenant_id: 'tenant-4', policy_type: 'auto_update',
+    });
+    const otherUserPolicy = await sqliteUpdatePolicies.upsert('user-5', {
+      winget_id: 'Other.App', tenant_id: 'tenant-4', policy_type: 'auto_update',
+    });
+
+    const job = await sqliteDb.jobs.create({
+      user_id: 'user-4', winget_id: 'Notepad++.Notepad++', version: '8.7', display_name: 'Notepad++',
+      installer_type: 'exe', installer_url: 'https://x', install_command: 'x', uninstall_command: 'x',
+      install_scope: 'machine', status: 'deployed',
+    });
+
+    const { id } = await sqliteAutoUpdateHistory.create(policy.id, '8.6', '8.7', 'minor');
+    await sqliteAutoUpdateHistory.updateStatus(id, 'completed', { packagingJobId: job.id, completedAt: new Date().toISOString() });
+    await sqliteAutoUpdateHistory.create(otherUserPolicy.policy.id, '1.0', '1.1', 'patch');
+
+    const list = await sqliteAutoUpdateHistory.listByUser('user-4', { limit: 10, offset: 0 });
+    expect(list).toHaveLength(1);
+    expect(list[0].policy).toEqual({ winget_id: 'Notepad++.Notepad++', tenant_id: 'tenant-4' });
+    expect(list[0].display_name).toBe('Notepad++');
+    expect(list[0].status).toBe('completed');
+
+    expect(await sqliteAutoUpdateHistory.listByUser('user-4', { status: 'pending', limit: 10, offset: 0 })).toHaveLength(0);
+    expect(await sqliteAutoUpdateHistory.listByUser('user-4', { wingetId: 'Other.App', limit: 10, offset: 0 })).toHaveLength(0);
+  });
+
   it('sqliteNotificationPreferences get returns null then upsert creates defaults-merged row', async () => {
     const { sqliteNotificationPreferences } = await import('../sqlite');
     expect(await sqliteNotificationPreferences.get('user-3')).toBeNull();
