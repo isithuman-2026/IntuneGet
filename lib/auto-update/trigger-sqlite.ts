@@ -73,6 +73,7 @@ export class AutoUpdateTriggerSqlite {
       updateType
     );
 
+    let jobId: string | undefined;
     try {
       const installerResolution = await getLatestInstallerInfo(
         undefined,
@@ -110,6 +111,7 @@ export class AutoUpdateTriggerSqlite {
         status: 'queued',
       });
 
+      jobId = job.id;
       await sqliteAutoUpdateHistory.updateStatus(historyId, 'packaging', { packagingJobId: job.id });
 
       const { isGitHubActionsConfigured, triggerPackagingWorkflow } = await import('@/lib/github-actions');
@@ -146,10 +148,22 @@ export class AutoUpdateTriggerSqlite {
     } catch (error) {
       await sqliteUpdatePolicies.incrementFailureCount(policy.id);
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      const completedAt = new Date().toISOString();
       await sqliteAutoUpdateHistory.updateStatus(historyId, 'failed', {
         errorMessage,
-        completedAt: new Date().toISOString(),
+        completedAt,
       });
+      // The packaging job row (if one was already created before the failure,
+      // e.g. triggerPackagingWorkflow threw after jobs.create) has its own
+      // status column that isn't touched by the history update above - leave
+      // it in a matching terminal state instead of stuck at 'queued' forever.
+      if (jobId) {
+        await getDatabase().jobs.update(jobId, {
+          status: 'failed',
+          error_message: errorMessage,
+          completed_at: completedAt,
+        });
+      }
       return { success: false, error: errorMessage, historyId };
     }
   }
@@ -210,7 +224,11 @@ export async function runAutoUpdatesForNewDetections(
       currentVersion: update.current_version,
       latestVersion: update.latest_version,
       displayName: update.display_name,
-      installerUrl: '', // filled in by getLatestInstallerInfo inside triggerAutoUpdate once packaging is wired
+      // Required by UpdateInfo's type but unused dead parameters here:
+      // triggerAutoUpdate re-resolves the installer itself via
+      // getLatestInstallerInfo(undefined, updateInfo.wingetId, ...), it never
+      // reads these three fields off the updateInfo object it's passed.
+      installerUrl: '',
       installerSha256: '',
       installerType: '',
     });

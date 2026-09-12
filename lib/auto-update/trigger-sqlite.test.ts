@@ -106,4 +106,59 @@ describe('AutoUpdateTriggerSqlite', () => {
     expect(result.success).toBe(true);
     expect(result.packagingJobId).toBeTruthy();
   });
+
+  it('marks the packaging job failed (not left queued) when workflow dispatch throws', async () => {
+    vi.doMock('@/lib/intune/graph-client', () => ({
+      getServicePrincipalToken: vi.fn().mockResolvedValue('fake-token'),
+    }));
+    vi.doMock('@/lib/github-actions', () => ({
+      isGitHubActionsConfigured: () => true,
+      triggerPackagingWorkflow: vi.fn().mockRejectedValue(new Error('dispatch exploded')),
+    }));
+    vi.doMock('./trigger', async (importOriginal) => {
+      const actual = await importOriginal<typeof import('./trigger')>();
+      return {
+        ...actual,
+        getLatestInstallerInfo: vi.fn().mockResolvedValue({
+          ok: true,
+          info: { wingetId: '7zip.7zip', latestVersion: '23.0', displayName: '7-Zip', installerUrl: 'https://x', installerSha256: 'a'.repeat(64), installerType: 'exe' },
+        }),
+      };
+    });
+
+    const { sqliteDb, sqliteUpdatePolicies } = await import('../db/sqlite');
+    const job = await sqliteDb.jobs.create({
+      user_id: 'user-1', winget_id: '7zip.7zip', version: '22.0', display_name: '7-Zip',
+      installer_type: 'exe', installer_url: 'https://x', install_command: 'x', uninstall_command: 'x',
+      install_scope: 'machine', status: 'deployed',
+    });
+    await sqliteDb.uploadHistory.create({
+      packaging_job_id: job.id, user_id: 'user-1', winget_id: '7zip.7zip', version: '22.0',
+      display_name: '7-Zip', intune_app_id: 'intune-1', intune_tenant_id: 'tenant-1',
+    });
+    const { policy } = await sqliteUpdatePolicies.upsert('user-1', {
+      winget_id: '7zip.7zip', tenant_id: 'tenant-1', policy_type: 'auto_update',
+      original_upload_history_id: job.id,
+      deployment_config: { displayName: '7-Zip', publisher: '7-Zip', architecture: 'x64', installerType: 'exe', installCommand: 'x', uninstallCommand: 'x', installScope: 'machine', detectionRules: [] },
+    });
+
+    const { AutoUpdateTriggerSqlite } = await import('./trigger-sqlite');
+    const trigger = new AutoUpdateTriggerSqlite();
+    const result = await trigger.triggerAutoUpdate(policy, {
+      wingetId: '7zip.7zip', currentVersion: '22.0', latestVersion: '23.0',
+      displayName: '7-Zip', installerUrl: 'https://x', installerSha256: 'a'.repeat(64), installerType: 'exe',
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/dispatch exploded/);
+
+    // Read back through the same getDatabase() entry point trigger-sqlite.ts
+    // itself uses (rather than the directly-imported sqliteDb), since
+    // lib/db/index.ts's internal `require('./sqlite.ts')` CJS interop can
+    // resolve to a separate module instance than a Vite ESM `import` of the
+    // same file within one test run.
+    const { getDatabase } = await import('../db');
+    const newJob = await getDatabase().jobs.getByStatus('failed', 10);
+    expect(newJob.some((j) => j.winget_id === '7zip.7zip' && j.version === '23.0')).toBe(true);
+  });
 });
