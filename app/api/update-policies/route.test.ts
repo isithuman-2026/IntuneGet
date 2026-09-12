@@ -5,11 +5,13 @@ const {
   createServerClientMock,
   getCatalogSourceMock,
   getAppForInstallerMock,
+  getDatabaseMock,
 } = vi.hoisted(() => ({
   parseAccessTokenMock: vi.fn(),
   createServerClientMock: vi.fn(),
   getCatalogSourceMock: vi.fn(),
   getAppForInstallerMock: vi.fn(),
+  getDatabaseMock: vi.fn(),
 }));
 
 vi.mock('@/lib/auth-utils', () => ({
@@ -21,6 +23,10 @@ vi.mock('@/lib/supabase', () => ({
   isSupabaseServerConfigured: () => true,
 }));
 
+vi.mock('@/lib/db', () => ({
+  getDatabase: getDatabaseMock,
+}));
+
 vi.mock('@/lib/catalog', () => ({
   getCatalogSource: getCatalogSourceMock,
 }));
@@ -29,7 +35,7 @@ import { POST } from '@/app/api/update-policies/route';
 
 interface TableData {
   update_check_results?: Record<string, unknown> | null;
-  upload_history?: Record<string, unknown> | null;
+  upload_history?: (Record<string, unknown> & { winget_id?: string; intune_tenant_id?: string }) | null;
   packaging_jobs?: Record<string, unknown> | null;
   user_settings?: Record<string, unknown> | null;
   existing_policy?: { id: string } | null;
@@ -124,6 +130,37 @@ function createSupabaseMock(data: TableData) {
     },
   };
 
+  // buildDeploymentConfigForApp reads upload_history/packaging_jobs via
+  // getDatabase() rather than the raw supabase client, so mirror the same
+  // fixture data through a minimal DatabaseAdapter-shaped mock.
+  getDatabaseMock.mockReturnValue({
+    uploadHistory: {
+      getByUserId: vi.fn(async () =>
+        data.upload_history
+          ? [{
+              id: data.upload_history.id as string,
+              packaging_job_id: (data.upload_history.packaging_job_id as string) ?? null,
+              user_id: 'user-1',
+              winget_id: data.upload_history.winget_id ?? '',
+              version: '',
+              display_name: '',
+              publisher: null,
+              intune_app_id: '',
+              intune_app_url: null,
+              intune_tenant_id: data.upload_history.intune_tenant_id ?? '',
+              app_source: null,
+              deployed_at: new Date().toISOString(),
+            }]
+          : []
+      ),
+    },
+    jobs: {
+      getById: vi.fn(async (id: string) =>
+        data.packaging_jobs && data.packaging_jobs.id === id ? data.packaging_jobs : null
+      ),
+    },
+  });
+
   return { supabase, insertPayloads, updatePayloads };
 }
 
@@ -200,7 +237,12 @@ describe('POST /api/update-policies', () => {
   it('derives a deployment_config from a prior deployment for auto_update', async () => {
     const { supabase, insertPayloads } = createSupabaseMock({
       update_check_results: { current_version: '1.0.0', latest_version: '2.0.0' },
-      upload_history: { id: 'upload-1', packaging_job_id: 'job-1' },
+      upload_history: {
+        id: 'upload-1',
+        packaging_job_id: 'job-1',
+        winget_id: 'Microsoft.Edge',
+        intune_tenant_id: 'tenant-1',
+      },
       packaging_jobs: {
         id: 'job-1',
         display_name: 'Microsoft Edge',

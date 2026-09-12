@@ -100,7 +100,7 @@ describe('ensureUpdatePolicy', () => {
     const result = await ensureUpdatePolicy({ ...ARGS, policyType: 'auto_update' });
 
     expect(result).toEqual({ status: 'saved' });
-    expect(buildDeploymentConfigForAppMock).toHaveBeenCalledWith(expect.anything(), {
+    expect(buildDeploymentConfigForAppMock).toHaveBeenCalledWith({
       userId: 'user-1',
       tenantId: 'tenant-1',
       wingetId: 'Publisher.App',

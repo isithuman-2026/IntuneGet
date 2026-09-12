@@ -7,7 +7,7 @@
  * deployment configuration server-side from a prior deployment or the catalog.
  */
 
-import { createServerClient } from '@/lib/supabase';
+import { getDatabase } from '@/lib/db';
 import { getCatalogSource } from '@/lib/catalog';
 import { normalizeInstaller } from '@/lib/manifest-api';
 import { selectWingetInstaller } from '@/lib/qa/candidate';
@@ -262,8 +262,6 @@ export function parsePsadtConfig(packageConfig: unknown): DeploymentConfig['psad
  * that were never deployed through IntuneGet.
  */
 export async function buildDefaultDeploymentConfig(
-  // Kept for call-site compatibility; the catalog source owns client creation.
-  _supabase: ReturnType<typeof createServerClient>,
   wingetId: string,
   latestVersion: string
 ): Promise<DeploymentConfig | null> {
@@ -358,7 +356,6 @@ export type BuildDeploymentConfigResult =
  * trigger route's "no policy yet" branch.
  */
 export async function buildDeploymentConfigForApp(
-  supabase: ReturnType<typeof createServerClient>,
   args: {
     userId: string;
     tenantId: string;
@@ -367,25 +364,17 @@ export async function buildDeploymentConfigForApp(
   }
 ): Promise<BuildDeploymentConfigResult> {
   const { userId, tenantId, wingetId, latestVersion } = args;
+  const db = getDatabase();
 
   // Get the original deployment config from upload_history
-  const { data: uploadHistory } = await supabase
-    .from('upload_history')
-    .select('id, packaging_job_id')
-    .eq('user_id', userId)
-    .eq('intune_tenant_id', tenantId)
-    .eq('winget_id', wingetId)
-    .order('deployed_at', { ascending: false })
-    .limit(1)
-    .maybeSingle();
+  const uploads = await db.uploadHistory.getByUserId(userId, 200);
+  const uploadHistory = uploads
+    .filter((u) => u.winget_id === wingetId && u.intune_tenant_id === tenantId)
+    .sort((a, b) => new Date(b.deployed_at).getTime() - new Date(a.deployed_at).getTime())[0];
 
   if (uploadHistory?.packaging_job_id) {
     // Has prior deployment: extract config from packaging job
-    const { data: packagingJob } = await supabase
-      .from('packaging_jobs')
-      .select('*')
-      .eq('id', uploadHistory.packaging_job_id)
-      .maybeSingle();
+    const packagingJob = await db.jobs.getById(uploadHistory.packaging_job_id);
 
     if (!packagingJob) {
       // Prior deployment exists but its packaging job is gone.
@@ -425,11 +414,7 @@ export async function buildDeploymentConfigForApp(
   }
 
   // No prior deployment: build config from curated catalog data
-  const defaultConfig = await buildDefaultDeploymentConfig(
-    supabase,
-    wingetId,
-    latestVersion
-  );
+  const defaultConfig = await buildDefaultDeploymentConfig(wingetId, latestVersion);
 
   if (!defaultConfig) {
     return { status: 'unavailable' };

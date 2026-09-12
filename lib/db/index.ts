@@ -44,8 +44,10 @@ export function getDatabase(): DatabaseAdapter {
   const mode = getDatabaseMode();
 
   if (mode === 'sqlite') {
-    // Dynamically import SQLite adapter to avoid bundling it in non-SQLite environments
-    const { sqliteDb } = require('./sqlite');
+    // Dynamically import SQLite adapter to avoid bundling it in non-SQLite environments.
+    // Explicit .ts extension: Vitest's CJS interop can't resolve extensionless
+    // TS requires here (works fine in Next.js/webpack either way).
+    const { sqliteDb } = require('./sqlite.ts');
     databaseInstance = sqliteDb;
     console.log('[Database] Using SQLite mode');
   } else {

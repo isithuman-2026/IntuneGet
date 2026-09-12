@@ -185,7 +185,7 @@ export async function POST(request: NextRequest) {
 
         // If no policy exists, check for prior deployment to get config
         if (!policy) {
-          const built = await buildDeploymentConfigForApp(supabase, {
+          const built = await buildDeploymentConfigForApp({
             userId: user.userId,
             tenantId: req.tenant_id,
             wingetId: req.winget_id,

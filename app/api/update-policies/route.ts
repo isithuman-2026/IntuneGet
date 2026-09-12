@@ -171,7 +171,7 @@ export async function POST(request: NextRequest) {
         latestVersion = catalogApp?.latest_version || '';
       }
 
-      const built = await buildDeploymentConfigForApp(supabase, {
+      const built = await buildDeploymentConfigForApp({
         userId: user.userId,
         tenantId: body.tenant_id,
         wingetId: body.winget_id,

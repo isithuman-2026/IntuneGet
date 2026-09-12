@@ -56,7 +56,7 @@ export async function ensureUpdatePolicy(args: {
     let originalUploadHistoryId: string | null = null;
 
     if (policyType === 'auto_update') {
-      const built = await buildDeploymentConfigForApp(supabase, {
+      const built = await buildDeploymentConfigForApp({
         userId,
         tenantId,
         wingetId,
