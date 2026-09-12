@@ -214,7 +214,7 @@ export async function runAutoUpdatesForNewDetections(
     const policy = await sqliteUpdatePolicies.getByApp(update.user_id, update.tenant_id, update.winget_id);
     if (!policy || policy.policy_type !== 'auto_update' || !policy.is_enabled) continue;
 
-    const delayDays = (policy as unknown as { delay_days: number }).delay_days ?? 0;
+    const delayDays = policy.delay_days ?? 0;
     const detectedAt = new Date(update.detected_at).getTime();
     const eligibleAt = detectedAt + delayDays * 24 * 60 * 60 * 1000;
     if (Date.now() < eligibleAt) continue; // still waiting out the delay

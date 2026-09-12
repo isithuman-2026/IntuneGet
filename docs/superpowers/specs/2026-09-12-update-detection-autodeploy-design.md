@@ -1,6 +1,9 @@
 # Update Detection + Auto-Deploy for SQLite Mode
 
-Status: approved design, not yet planned/implemented.
+Status: implemented 2026-09-12, verified end-to-end on the lab tenant (real update
+detected for Foxit.FoxitReader 2026.1.3.36551 -> 2026.2.0.39747, auto_update policy
+triggered a new packaging job, real GitHub Actions run dispatched and captured
+[run 34724220143]).
 Backlog ref: `backlog_intuneget_lab_pilot.md` item 9b.
 
 ## Problem

@@ -86,6 +86,7 @@ export interface AppUpdatePolicy {
   pinned_version: string | null;
   deployment_config: DeploymentConfig | null;
   original_upload_history_id: string | null;
+  delay_days: number;
   last_auto_update_at: string | null;
   last_auto_update_version: string | null;
   is_enabled: boolean;
