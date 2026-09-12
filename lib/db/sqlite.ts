@@ -1047,6 +1047,7 @@ export const sqliteUpdateChecks = {
   },
 
   async dismiss(userId: string, ids: string[], dismissed: boolean): Promise<number> {
+    if (ids.length === 0) return 0;
     const database = getDb();
     const placeholders = ids.map(() => '?').join(', ');
     const now = new Date().toISOString();
