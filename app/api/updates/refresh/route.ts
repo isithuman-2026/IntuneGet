@@ -6,6 +6,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { parseVersion } from '@/lib/version-compare';
 import { createServerClient, isSupabaseServerConfigured } from '@/lib/supabase';
+import { isSqliteMode } from '@/lib/db';
+import { runUpdateCheck } from '@/lib/auto-update/check-updates';
 import { parseAccessToken } from '@/lib/auth-utils';
 import { resolveTargetTenantId } from '@/lib/msp/tenant-resolution';
 import { GET as getLiveIntuneUpdates } from '@/app/api/intune/apps/updates/route';
@@ -51,6 +53,18 @@ export async function POST(request: NextRequest) {
 
     const body = (await request.json().catch(() => ({}))) as RefreshRequestBody;
     const requestedTenantId = body.tenant_id?.trim() || null;
+
+    if (isSqliteMode()) {
+      const result = await runUpdateCheck();
+      return NextResponse.json({
+        success: result.errors.length === 0,
+        refreshedCount: result.updatesFound,
+        removedCount: 0,
+        updateCount: result.updatesFound,
+        matchingSummary: { totalChecked: result.usersChecked, noMatch: 0, lowConfidenceSkipped: 0, packageNotInCache: 0 },
+        ...(result.errors.length > 0 ? { errors: result.errors } : {}),
+      });
+    }
 
     if (!isSupabaseServerConfigured()) {
       return NextResponse.json(

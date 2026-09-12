@@ -6,6 +6,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { sanitizeAssignmentsForDispatch } from '@/lib/assignment-intents';
 import { createServerClient, isSupabaseServerConfigured } from '@/lib/supabase';
+import { isSqliteMode } from '@/lib/db';
+import { sqliteUpdateChecks, sqliteUpdatePolicies } from '@/lib/db/sqlite';
+import { AutoUpdateTriggerSqlite } from '@/lib/auto-update/trigger-sqlite';
 import { getCatalogSource } from '@/lib/catalog';
 import { parseAccessToken } from '@/lib/auth-utils';
 import {
@@ -73,6 +76,74 @@ export async function POST(request: NextRequest) {
         { error: 'Maximum 10 updates can be triggered at once' },
         { status: 400 }
       );
+    }
+
+    if (isSqliteMode()) {
+      const trigger = new AutoUpdateTriggerSqlite();
+      const response: TriggerUpdateResponse = { success: true, triggered: 0, failed: 0, results: [] };
+
+      for (const req of updateRequests) {
+        if (isSelfUpdatingApp(req.winget_id)) {
+          response.failed++;
+          response.results.push({ winget_id: req.winget_id, tenant_id: req.tenant_id, success: false, error: `${req.winget_id} keeps itself up to date on the device (Click-to-Run); IntuneGet does not deploy updates for it.` });
+          continue;
+        }
+
+        const updateResult = await sqliteUpdateChecks.getOne(user.userId, req.tenant_id, req.winget_id);
+        if (!updateResult) {
+          response.failed++;
+          response.results.push({ winget_id: req.winget_id, tenant_id: req.tenant_id, success: false, error: 'Update not found' });
+          continue;
+        }
+
+        let policy = await sqliteUpdatePolicies.getByApp(user.userId, req.tenant_id, req.winget_id);
+        if (!policy) {
+          const built = await buildDeploymentConfigForApp({ userId: user.userId, tenantId: req.tenant_id, wingetId: req.winget_id, latestVersion: updateResult.latest_version });
+          if (built.status !== 'ok') {
+            response.failed++;
+            response.results.push({ winget_id: req.winget_id, tenant_id: req.tenant_id, success: false, error: built.status === 'orphaned_job' ? 'Could not retrieve deployment configuration' : 'No installer data or catalog entry available for this app.' });
+            continue;
+          }
+          const { policy: newPolicy } = await sqliteUpdatePolicies.upsert(user.userId, {
+            winget_id: req.winget_id, tenant_id: req.tenant_id, policy_type: 'notify',
+            deployment_config: built.deploymentConfig, original_upload_history_id: built.originalUploadHistoryId || undefined,
+          });
+          policy = newPolicy;
+        }
+
+        const shouldTemporarilyEnable = policy.policy_type !== 'auto_update' || !policy.is_enabled;
+        if (shouldTemporarilyEnable) {
+          await sqliteUpdatePolicies.update(policy.id, user.userId, { policy_type: 'auto_update', is_enabled: true });
+          policy = { ...policy, policy_type: 'auto_update', is_enabled: true };
+        }
+
+        const triggerResult = await trigger.triggerAutoUpdate(policy, {
+          wingetId: req.winget_id,
+          currentVersion: updateResult.current_version,
+          latestVersion: updateResult.latest_version,
+          displayName: updateResult.display_name,
+          installerUrl: '', installerSha256: '', installerType: '',
+        }, { skipRateLimits: true, skipPriorDeploymentCheck: true });
+
+        if (shouldTemporarilyEnable) {
+          // triggerAutoUpdate doesn't mutate the caller's policy_type back; restore
+          // explicitly since manual trigger shouldn't permanently flip the policy.
+          // (Local `policy` was already reassigned to 'auto_update' above, so a
+          // check against that field here would always be false - restore always.)
+          await sqliteUpdatePolicies.update(policy.id, user.userId, { policy_type: 'notify' });
+        }
+
+        if (triggerResult.success) {
+          response.triggered++;
+          response.results.push({ winget_id: req.winget_id, tenant_id: req.tenant_id, success: true, packaging_job_id: triggerResult.packagingJobId });
+        } else {
+          response.failed++;
+          response.results.push({ winget_id: req.winget_id, tenant_id: req.tenant_id, success: false, error: triggerResult.error || triggerResult.skipReason || 'Unknown error' });
+        }
+      }
+
+      response.success = response.failed === 0;
+      return NextResponse.json(response);
     }
 
     if (!isSupabaseServerConfigured()) {
