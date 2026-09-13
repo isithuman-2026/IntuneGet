@@ -3,7 +3,7 @@ import path from 'path';
 import os from 'os';
 import fs from 'fs';
 
-describe('GET /api/intune/apps/[intuneAppId]/versions', () => {
+describe('GET /api/intune/apps/[id]/versions', () => {
   let tmpDbPath: string;
 
   beforeEach(() => {
@@ -40,7 +40,7 @@ describe('GET /api/intune/apps/[intuneAppId]/versions', () => {
     const { GET } = await import('./route');
     const response = await GET(
       new Request('http://x/api/intune/apps/app-abc/versions', { headers: { Authorization: 'Bearer x' } }),
-      { params: Promise.resolve({ intuneAppId: 'app-abc' }) }
+      { params: Promise.resolve({ id: 'app-abc' }) }
     );
     expect(response.status).toBe(200);
     const body = await response.json();

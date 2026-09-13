@@ -37,9 +37,9 @@ function fromGraphAssignment(assignment: Win32LobAppAssignment): PackageAssignme
 
 export async function POST(
   request: NextRequest,
-  { params }: { params: Promise<{ intuneAppId: string }> }
+  { params }: { params: Promise<{ id: string }> }
 ) {
-  const { intuneAppId } = await params;
+  const { id: intuneAppId } = await params;
   const user = await parseAccessToken(request.headers.get('Authorization'));
   if (!user) {
     return NextResponse.json({ error: 'Authentication required' }, { status: 401 });

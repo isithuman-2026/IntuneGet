@@ -3,7 +3,7 @@ import path from 'path';
 import os from 'os';
 import fs from 'fs';
 
-describe('PATCH /api/intune/apps/[intuneAppId]/edit - instant path', () => {
+describe('PATCH /api/intune/apps/[id]/edit - instant path', () => {
   let tmpDbPath: string;
 
   beforeEach(() => {
@@ -35,7 +35,7 @@ describe('PATCH /api/intune/apps/[intuneAppId]/edit - instant path', () => {
         headers: { Authorization: 'Bearer x', 'Content-Type': 'application/json' },
         body: JSON.stringify({ policyType: 'ignore' }),
       }),
-      { params: Promise.resolve({ intuneAppId: 'unknown-app' }) }
+      { params: Promise.resolve({ id: 'unknown-app' }) }
     );
     expect(response.status).toBe(404);
   });
@@ -64,7 +64,7 @@ describe('PATCH /api/intune/apps/[intuneAppId]/edit - instant path', () => {
           delayDays: 3,
         }),
       }),
-      { params: Promise.resolve({ intuneAppId: 'app-abc' }) }
+      { params: Promise.resolve({ id: 'app-abc' }) }
     );
 
     expect(response.status).toBe(200);
@@ -101,7 +101,7 @@ describe('PATCH /api/intune/apps/[intuneAppId]/edit - instant path', () => {
           categories: [{ id: 'cat-1' }],
         }),
       }),
-      { params: Promise.resolve({ intuneAppId: 'app-abc' }) }
+      { params: Promise.resolve({ id: 'app-abc' }) }
     );
 
     expect(response.status).toBe(200);
@@ -124,7 +124,7 @@ describe('PATCH /api/intune/apps/[intuneAppId]/edit - instant path', () => {
         headers: { Authorization: 'Bearer x', 'Content-Type': 'application/json' },
         body: JSON.stringify({ installCommand: 'newinstall.exe /S' }),
       }),
-      { params: Promise.resolve({ intuneAppId: 'app-abc' }) }
+      { params: Promise.resolve({ id: 'app-abc' }) }
     );
     expect(response.status).toBe(400);
   });
@@ -159,7 +159,7 @@ describe('PATCH /api/intune/apps/[intuneAppId]/edit - instant path', () => {
         headers: { Authorization: 'Bearer x', 'Content-Type': 'application/json' },
         body: JSON.stringify({ installCommand: 'newinstall.exe /S', confirmRedeploy: true }),
       }),
-      { params: Promise.resolve({ intuneAppId: 'app-abc' }) }
+      { params: Promise.resolve({ id: 'app-abc' }) }
     );
     expect(response.status).toBe(200);
     const body = await response.json();

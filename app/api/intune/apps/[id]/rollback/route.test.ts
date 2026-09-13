@@ -3,7 +3,7 @@ import path from 'path';
 import os from 'os';
 import fs from 'fs';
 
-describe('POST /api/intune/apps/[intuneAppId]/rollback', () => {
+describe('POST /api/intune/apps/[id]/rollback', () => {
   let tmpDbPath: string;
 
   beforeEach(() => {
@@ -46,7 +46,7 @@ describe('POST /api/intune/apps/[intuneAppId]/rollback', () => {
         headers: { Authorization: 'Bearer x', 'Content-Type': 'application/json' },
         body: JSON.stringify({ packagingJobId: 'job-1' }),
       }),
-      { params: Promise.resolve({ intuneAppId: 'unknown' }) }
+      { params: Promise.resolve({ id: 'unknown' }) }
     );
     expect(response.status).toBe(404);
   });
@@ -76,7 +76,7 @@ describe('POST /api/intune/apps/[intuneAppId]/rollback', () => {
         headers: { Authorization: 'Bearer x', 'Content-Type': 'application/json' },
         body: JSON.stringify({ packagingJobId: otherJob.id }),
       }),
-      { params: Promise.resolve({ intuneAppId: 'app-abc' }) }
+      { params: Promise.resolve({ id: 'app-abc' }) }
     );
     expect(response.status).toBe(400);
   });
@@ -115,7 +115,7 @@ describe('POST /api/intune/apps/[intuneAppId]/rollback', () => {
         headers: { Authorization: 'Bearer x', 'Content-Type': 'application/json' },
         body: JSON.stringify({ packagingJobId: oldJob.id }),
       }),
-      { params: Promise.resolve({ intuneAppId: 'app-abc' }) }
+      { params: Promise.resolve({ id: 'app-abc' }) }
     );
     expect(response.status).toBe(200);
     const body = await response.json();
