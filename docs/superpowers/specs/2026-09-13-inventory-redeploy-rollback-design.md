@@ -7,6 +7,21 @@ end-to-end verification.
 
 ## Problem
 
+**Also found while scoping this spec, 2026-09-13**: `app/(app)/dashboard/settings`
+already has a "Cart Behaviour" section with "Carry over assignments on app
+updates" and "Supersede previous version on update" toggles
+(`components/providers/UserSettingsProvider.tsx`,
+`types/user-settings.ts`) — these are exactly the two settings Design 1
+needs. They already exist in the UI and are genuinely broken in SQLite
+mode: `app/api/user/settings/route.ts`'s `PATCH` returns a literal
+`503 "Saving user settings requires hosted services"` when Supabase isn't
+configured, and its `GET` always returns hardcoded
+`DEFAULT_USER_SETTINGS` — the toggle can never actually save or reflect a
+saved value. This spec's original draft assumed no such UI existed and
+planned to hardcode both behaviors to `true`; that was wrong on two counts:
+the UI exists and must not silently ignore what it shows, and the
+product's real default for both settings is `false` (opt-in), not `true`.
+
 The update-detection + auto-deploy pipeline shipped 2026-09-12
 (`docs/superpowers/specs/2026-09-12-update-detection-autodeploy-design.md`) was
 verified live against the real lab tenant on 2026-09-12/13. Two real gaps
@@ -48,6 +63,9 @@ surfaced:
 
 ## Goals
 
+0. The existing Settings → Cart Behaviour toggles ("Carry over assignments
+   on app updates", "Supersede previous version on update") actually save
+   and are honored, in SQLite mode.
 1. `AutoUpdateTriggerSqlite` produces an Intune outcome equivalent to the
    Supabase-mode `AutoUpdateTrigger`: the new version supersedes the old
    Win32LobApp (not a duplicate) and carries over assignments/categories.
@@ -68,10 +86,8 @@ surfaced:
 - Editing apps IntuneGet did not originally deploy (no `upload_history` row
   to rebuild from) — Inventory view stays fully read-only for those, as
   today.
-- A settings UI for `carryOverAssignments`/`autoSupersede` — SQLite mode is
-  single-tenant self-hosted with no `user_settings` table; both are simply
-  `true` unconditionally for every SQLite-mode redeploy (Supabase mode's
-  opt-in-default-false stays as is, unrelated to this work).
+- Any new settings UI — the "Cart Behaviour" toggles already exist and are
+  in scope to *fix* (Design 0 below), not to redesign or add to.
 - Any change to the Supabase-mode `AutoUpdateTrigger`, its UI, or its
   per-user settings — this spec is SQLite-mode only, matching the parent
   2026-09-12 spec's scope.
@@ -100,6 +116,26 @@ requested; nothing here blocks it.
 
 ## Design
 
+### 0. Fix `app/api/user/settings/route.ts` for SQLite mode
+
+New SQLite table `user_settings` (single JSON blob per user, mirrors the
+`notification_preferences` single-row-per-user pattern from the 2026-09-12
+plan's Task 4 exactly): `id, user_id TEXT UNIQUE NOT NULL, settings TEXT
+NOT NULL (JSON), created_at, updated_at`. A new `sqliteUserSettings` module
+in `lib/db/sqlite.ts` with `get(userId)`/`upsert(userId, update)`, reusing
+the route's existing `sanitizeSettings()`/`DEFAULT_USER_SETTINGS` merge
+logic unchanged (same shape, same defaults, same "merge over existing"
+semantics as the Supabase path already implements).
+
+`GET`/`PATCH` in `app/api/user/settings/route.ts` gain an `isSqliteMode()`
+branch before the existing `isSupabaseServerConfigured()` guard, exactly
+the established pattern from every other route in the 2026-09-12 plan —
+the Supabase path is untouched.
+
+This is a plain bug fix, independent of Designs 1-5 below, and should land
+first: it makes an already-shipped, already-visible UI control actually
+work, and Design 1 depends on reading its result correctly.
+
 ### 1. `AutoUpdateTriggerSqlite` supersedence fix
 
 `lib/auto-update/trigger-sqlite.ts`:
@@ -110,19 +146,27 @@ requested; nothing here blocks it.
   into `runAutoUpdatesForNewDetections()` (`lib/db/sqlite.ts` /
   `update_check_results.intune_app_id` — already populated by
   `runUpdateCheck()`, just unread here today).
+- Read the user's `carryOverAssignments`/`supersedePreviousApp` settings via
+  the new `sqliteUserSettings.get()` (Design 0) — same read Supabase mode's
+  `AutoUpdateTrigger` already does via its own `getUserUpdateSettings()`,
+  same defaults (`false`/`false` — matching `DEFAULT_USER_SETTINGS`, an
+  opt-in behavior, not assumed-on).
 - In the `triggerPackagingWorkflow()` call (currently only sets
   `forceCreate`), add:
   - `assignments: JSON.stringify(deploymentConfig.assignments || [])`
   - `categories: JSON.stringify(deploymentConfig.categories || [])`
   - `sourceIntuneAppId: currentIntuneAppId || undefined`
-  - `autoSupersede: Boolean(currentIntuneAppId)`
-  - `supersedenceType: currentIntuneAppId ? 'update' : undefined`
-  - `carryOverAssignments: true`
-  - `removeAssignmentsFromPreviousApp: true`
+  - `autoSupersede: supersedePreviousApp && Boolean(currentIntuneAppId)`
+  - `supersedenceType: autoSupersede ? 'update' : undefined`
+  - `carryOverAssignments: carryOverAssignments`
+  - `removeAssignmentsFromPreviousApp: carryOverAssignments`
   - `forceCreate` stays `true` (Win32LobApp objects are immutable per
     version in Graph — a "replace" *is* create-new + supersede-old, not a
     PATCH of the existing object; this is not a contradiction with
-    superseding).
+    superseding). When `supersedePreviousApp` is off, this intentionally
+    reproduces today's actual duplicate-creating behavior — that's the
+    user's explicit choice via the existing toggle, not a bug to design
+    around.
 - No new Graph calls, no workflow-repo changes — this reuses the exact path
   `AutoUpdateTrigger` (Supabase mode) already exercises in production.
 
@@ -225,6 +269,10 @@ Same route, redeploy-path fields (`installCommand`, `uninstallCommand`,
 
 ## Testing
 
+- Unit tests for Design 0: `GET`/`PATCH` SQLite branches round-trip
+  `carryOverAssignments`/`supersedePreviousApp` (and the other existing
+  `UserSettings` fields, unaffected) correctly, matching the Supabase
+  path's merge-over-existing semantics.
 - Unit tests for the Design 1 fix: `triggerAutoUpdate()` passes the new
   `WorkflowInputs` fields correctly given a `currentIntuneAppId` present vs.
   absent (first-ever deploy has none).
@@ -241,10 +289,17 @@ Same route, redeploy-path fields (`installCommand`, `uninstallCommand`,
 
 ## Acceptance criteria
 
-- [ ] A real `auto_update` policy trigger on a previously-deployed app
-      supersedes the existing Intune app (single app in Windows apps list
-      before and after, not two) and the new version's assignments match
-      the original's.
+- [ ] The "Carry over assignments" / "Supersede previous version" toggles
+      in Settings → Cart Behaviour actually save (no 503) and persist
+      across a page reload, in SQLite mode.
+- [ ] With "Supersede previous version" **on**, a real `auto_update` policy
+      trigger on a previously-deployed app supersedes the existing Intune
+      app (single app in Windows apps list before and after, not two) and,
+      with "Carry over assignments" also on, the new version's assignments
+      match the original's.
+- [ ] With "Supersede previous version" **off** (the default), auto-update
+      behavior is unchanged from today (creates a new app) — this is the
+      documented, user-controlled default, not a regression.
 - [ ] Inventory app details panel shows an Edit toggle only for apps with
       upload history; other apps stay fully read-only.
 - [ ] Assignment/category/notification/policy/deferral edits save without
