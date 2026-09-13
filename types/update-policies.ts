@@ -15,7 +15,7 @@ export type UpdatePolicyType = 'auto_update' | 'notify' | 'ignore' | 'pin_versio
 export type AutoUpdateStatus = 'pending' | 'packaging' | 'deploying' | 'completed' | 'failed' | 'cancelled';
 
 // Update type classification
-export type UpdateType = 'patch' | 'minor' | 'major';
+export type UpdateType = 'patch' | 'minor' | 'major' | 'rollback';
 
 /**
  * Deployment configuration saved for auto-updates
@@ -288,6 +288,13 @@ export function classifyUpdateType(fromVersion: string, toVersion: string): Upda
 
   const from = parseSimple(fromVersion);
   const to = parseSimple(toVersion);
+
+  const toTuple = [to.major, to.minor, to.patch];
+  const fromTuple = [from.major, from.minor, from.patch];
+  const isDowngrade = toTuple[0] < fromTuple[0] ||
+    (toTuple[0] === fromTuple[0] && toTuple[1] < fromTuple[1]) ||
+    (toTuple[0] === fromTuple[0] && toTuple[1] === fromTuple[1] && toTuple[2] < fromTuple[2]);
+  if (isDowngrade) return 'rollback';
 
   if (to.major > from.major) return 'major';
   if (to.minor > from.minor) return 'minor';
