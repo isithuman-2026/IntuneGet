@@ -10,6 +10,8 @@ import type { DatabaseAdapter, PackagingJob, UploadHistoryRecord } from './types
 import type { WebhookConfiguration, WebhookConfigurationInput, WebhookConfigurationUpdate } from '@/types/notifications';
 import type { ClaimedApp } from '@/types/unmanaged';
 import type { AppUpdatePolicy, AppUpdatePolicyInput } from '@/types/update-policies';
+import type { UserSettings } from '@/types/user-settings';
+import { DEFAULT_USER_SETTINGS } from '@/types/user-settings';
 
 export interface NotificationPreferencesRow {
   id: string;
@@ -296,6 +298,17 @@ function initializeSchema(db: Database.Database): void {
       notify_on_update_available INTEGER NOT NULL DEFAULT 1,
       notify_on_deployed INTEGER NOT NULL DEFAULT 1,
       notify_on_error INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `);
+
+  // Create user_settings table
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS user_settings (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL UNIQUE,
+      settings TEXT NOT NULL,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     )
@@ -1379,6 +1392,40 @@ export const sqliteNotificationPreferences = {
         now, now
       );
     return (await this.get(userId)) as NotificationPreferencesRow;
+  },
+};
+
+/**
+ * SQLite-only user settings storage.
+ * Handles user-specific application settings and preferences.
+ */
+export const sqliteUserSettings = {
+  async get(userId: string): Promise<UserSettings | null> {
+    const database = getDb();
+    const row = database
+      .prepare('SELECT settings FROM user_settings WHERE user_id = ?')
+      .get(userId) as { settings: string } | undefined;
+    if (!row) return null;
+    return { ...DEFAULT_USER_SETTINGS, ...JSON.parse(row.settings) };
+  },
+
+  async upsert(userId: string, update: Partial<UserSettings>): Promise<UserSettings> {
+    const database = getDb();
+    const existing = await this.get(userId);
+    const merged: UserSettings = { ...(existing ?? DEFAULT_USER_SETTINGS), ...update };
+    const now = new Date().toISOString();
+
+    const result = database
+      .prepare('UPDATE user_settings SET settings = ?, updated_at = ? WHERE user_id = ?')
+      .run(JSON.stringify(merged), now, userId);
+
+    if (result.changes === 0) {
+      database
+        .prepare('INSERT INTO user_settings (id, user_id, settings, created_at, updated_at) VALUES (?, ?, ?, ?, ?)')
+        .run(crypto.randomUUID(), userId, JSON.stringify(merged), now, now);
+    }
+
+    return merged;
   },
 };
 
