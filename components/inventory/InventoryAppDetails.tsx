@@ -23,6 +23,8 @@ export function InventoryAppDetails({ appId, onClose, onUpdate }: InventoryAppDe
   const [isEditing, setIsEditing] = useState(false);
   const [editedPolicyType, setEditedPolicyType] = useState<UpdatePolicyType>('notify');
   const [editedDelayDays, setEditedDelayDays] = useState(0);
+  const [editedInstallCommand, setEditedInstallCommand] = useState('');
+  const [editedUninstallCommand, setEditedUninstallCommand] = useState('');
   const editApp = useEditApp(appId || '');
 
   useEffect(() => {
@@ -199,14 +201,66 @@ export function InventoryAppDetails({ appId, onClose, onUpdate }: InventoryAppDe
           )}
 
           {/* Commands */}
-          <div className="space-y-4">
-            {app.installCommandLine && (
-              <CopyableCommand command={app.installCommandLine} label="Install Command" />
-            )}
-            {app.uninstallCommandLine && (
-              <CopyableCommand command={app.uninstallCommandLine} label="Uninstall Command" />
-            )}
-          </div>
+          {isEditing ? (
+            <div>
+              <h4 className="text-xs font-medium text-text-muted uppercase tracking-wider mb-3">
+                Package Settings
+              </h4>
+              <div className="space-y-3">
+                <div>
+                  <label className="text-xs text-text-muted">Install Command</label>
+                  <input
+                    value={editedInstallCommand || app.installCommandLine || ''}
+                    onChange={(e) => setEditedInstallCommand(e.target.value)}
+                    className="w-full bg-bg-elevated border border-overlay/10 rounded-lg px-3 py-2 text-sm text-text-primary font-mono"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs text-text-muted">Uninstall Command</label>
+                  <input
+                    value={editedUninstallCommand || app.uninstallCommandLine || ''}
+                    onChange={(e) => setEditedUninstallCommand(e.target.value)}
+                    className="w-full bg-bg-elevated border border-overlay/10 rounded-lg px-3 py-2 text-sm text-text-primary font-mono"
+                  />
+                </div>
+                <Button
+                  onClick={() => {
+                    const confirmed = window.confirm(
+                      'This creates a new packaging job, a new Intune app version that supersedes the current one, and installed devices will re-run install. Continue?'
+                    );
+                    if (!confirmed) return;
+                    editApp.mutate({
+                      installCommand: editedInstallCommand || undefined,
+                      uninstallCommand: editedUninstallCommand || undefined,
+                      confirmRedeploy: true,
+                    });
+                  }}
+                  disabled={editApp.isPending}
+                  variant="outline"
+                  className="w-full border-status-warning/30 text-status-warning"
+                >
+                  {editApp.isPending ? 'Redeploying...' : 'Save & Redeploy'}
+                </Button>
+                {editApp.isSuccess && editApp.data.redeploy?.packagingJobId && (
+                  <p className="text-sm text-status-success mt-2">
+                    Redeploy started — <a href="/dashboard/uploads" className="underline">view progress</a>
+                  </p>
+                )}
+                {editApp.isError && (
+                  <p className="text-sm text-status-error mt-2">{editApp.error.message}</p>
+                )}
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {app.installCommandLine && (
+                <CopyableCommand command={app.installCommandLine} label="Install Command" />
+              )}
+              {app.uninstallCommandLine && (
+                <CopyableCommand command={app.uninstallCommandLine} label="Uninstall Command" />
+              )}
+            </div>
+          )}
 
           {/* Assignments */}
           {app.assignments && app.assignments.length > 0 && (

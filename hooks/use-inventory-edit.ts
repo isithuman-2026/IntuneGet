@@ -10,15 +10,22 @@ export interface EditAppInstantFields {
   delayDays?: number;
 }
 
+export interface EditAppFields extends EditAppInstantFields {
+  installCommand?: string;
+  uninstallCommand?: string;
+  confirmRedeploy?: boolean;
+}
+
 export interface EditAppResult {
   results: Record<string, 'ok' | { error: string }>;
+  redeploy?: { packagingJobId?: string; error?: string };
 }
 
 export function useEditApp(intuneAppId: string) {
   const { getAccessToken } = useMicrosoftAuth();
   const queryClient = useQueryClient();
 
-  return useMutation<EditAppResult, Error, EditAppInstantFields>({
+  return useMutation<EditAppResult, Error, EditAppFields>({
     mutationFn: async (fields) => {
       const token = await getAccessToken();
       if (!token) throw new Error('Not authenticated');
