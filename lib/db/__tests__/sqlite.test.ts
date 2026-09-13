@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import Database from 'better-sqlite3';
 import type { DatabaseAdapter, PackagingJob, UploadHistoryRecord } from '../types';
+import { sqliteUploadHistory, sqliteDb } from '../sqlite';
 
 // Create an in-memory SQLite adapter for testing
 function createTestAdapter(): DatabaseAdapter & { close: () => void } {
@@ -817,6 +818,21 @@ describe('SQLite Database Adapter', () => {
       const history = await adapter.uploadHistory.getByUserId('non-existent-user');
 
       expect(history).toEqual([]);
+    });
+  });
+
+  describe('sqliteUploadHistory.getLatestByIntuneAppId', () => {
+    it('finds the row and returns null for an unknown app id', async () => {
+      await sqliteDb.uploadHistory.create({
+        user_id: 'user-1', winget_id: 'Foxit.FoxitReader', version: '2026.1.3.36551',
+        display_name: 'Foxit PDF Reader', intune_app_id: 'app-abc', intune_tenant_id: 'tenant-1',
+      });
+
+      const found = await sqliteUploadHistory.getLatestByIntuneAppId('tenant-1', 'app-abc');
+      expect(found?.winget_id).toBe('Foxit.FoxitReader');
+      expect(found?.user_id).toBe('user-1');
+
+      expect(await sqliteUploadHistory.getLatestByIntuneAppId('tenant-1', 'nonexistent')).toBeNull();
     });
   });
 });

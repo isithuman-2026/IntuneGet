@@ -1430,6 +1430,20 @@ export const sqliteUserSettings = {
 };
 
 /**
+ * SQLite-only upload history lookup for resolved app lineage.
+ * Provides direct queries for edit/rollback decision gates.
+ */
+export const sqliteUploadHistory = {
+  async getLatestByIntuneAppId(tenantId: string, intuneAppId: string): Promise<UploadHistoryRecord | null> {
+    const database = getDb();
+    const row = database
+      .prepare('SELECT * FROM upload_history WHERE intune_tenant_id = ? AND intune_app_id = ? ORDER BY deployed_at DESC LIMIT 1')
+      .get(tenantId, intuneAppId) as UploadHistoryRecord | undefined;
+    return row ?? null;
+  },
+};
+
+/**
  * Close the database connection (for cleanup)
  */
 export function closeSqliteDb(): void {
