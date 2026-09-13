@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Package, Calendar, User, AlertCircle, Loader2, Search, RefreshCw, ExternalLink, Users } from 'lucide-react';
 import { CopyableCommand } from './CopyableCommand';
 import { Button } from '@/components/ui/button';
@@ -24,6 +24,11 @@ export function InventoryAppDetails({ appId, onClose, onUpdate }: InventoryAppDe
   const [editedPolicyType, setEditedPolicyType] = useState<UpdatePolicyType>('notify');
   const [editedDelayDays, setEditedDelayDays] = useState(0);
   const editApp = useEditApp(appId || '');
+
+  useEffect(() => {
+    setEditedPolicyType(data?.policy?.policyType ?? 'notify');
+    setEditedDelayDays(data?.policy?.delayDays ?? 0);
+  }, [data]);
 
   const formatDate = (dateString: string) => {
     return new Date(dateString).toLocaleDateString('en-US', {

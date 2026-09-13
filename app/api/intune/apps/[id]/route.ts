@@ -9,8 +9,9 @@ import { resolveTargetTenantId } from '@/lib/msp/tenant-resolution';
 import { parseAccessToken } from '@/lib/auth-utils';
 import { getServicePrincipalToken } from '@/lib/intune/graph-client';
 import { isSqliteMode } from '@/lib/db';
-import { sqliteUploadHistory } from '@/lib/db/sqlite';
+import { sqliteUploadHistory, sqliteUpdatePolicies } from '@/lib/db/sqlite';
 import type { IntuneAppWithAssignments, IntuneAppAssignment } from '@/types/inventory';
+import type { UpdatePolicyType } from '@/types/update-policies';
 
 const GRAPH_API_BASE = 'https://graph.microsoft.com/beta';
 
@@ -102,11 +103,26 @@ export async function GET(
       assignments,
     };
 
-    const hasUploadHistory = isSqliteMode()
-      ? Boolean(await sqliteUploadHistory.getLatestByIntuneAppId(tenantId, id))
-      : false;
+    let hasUploadHistory = false;
+    let policy: { policyType: UpdatePolicyType; delayDays: number } | null = null;
 
-    return NextResponse.json({ app, hasUploadHistory });
+    if (isSqliteMode()) {
+      const uploadHistory = await sqliteUploadHistory.getLatestByIntuneAppId(tenantId, id);
+      hasUploadHistory = Boolean(uploadHistory);
+
+      if (uploadHistory) {
+        const existingPolicy = await sqliteUpdatePolicies.getByApp(
+          uploadHistory.user_id,
+          tenantId,
+          uploadHistory.winget_id
+        );
+        policy = existingPolicy
+          ? { policyType: existingPolicy.policy_type, delayDays: existingPolicy.delay_days ?? 0 }
+          : { policyType: 'notify', delayDays: 0 };
+      }
+    }
+
+    return NextResponse.json({ app, hasUploadHistory, policy });
   } catch {
     return NextResponse.json(
       { error: 'Failed to fetch app details' },

@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useMicrosoftAuth } from './useMicrosoftAuth';
 import { useMspOptional } from './useMspOptional';
 import type { IntuneWin32App, IntuneAppWithAssignments } from '@/types/inventory';
+import type { UpdatePolicyType } from '@/types/update-policies';
 
 interface InventoryResponse {
   apps: IntuneWin32App[];
@@ -13,6 +14,7 @@ interface InventoryResponse {
 interface AppDetailsResponse {
   app: IntuneAppWithAssignments;
   hasUploadHistory: boolean;
+  policy: { policyType: UpdatePolicyType; delayDays: number } | null;
 }
 
 export function useInventoryApps() {
