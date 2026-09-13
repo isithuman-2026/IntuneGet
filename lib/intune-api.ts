@@ -701,6 +701,20 @@ export async function getAppCategories(
 }
 
 /**
+ * Get assignments currently on an app
+ */
+export async function getAppAssignments(
+  accessToken: string,
+  appId: string
+): Promise<Win32LobAppAssignment[]> {
+  return await fetchAllGraphPages<Win32LobAppAssignment>(
+    `${GRAPH_API_BASE}/deviceAppManagement/mobileApps/${appId}/assignments`,
+    accessToken,
+    'Failed to get app assignments'
+  );
+}
+
+/**
  * Add a category to an app via $ref
  */
 export async function addAppCategory(
