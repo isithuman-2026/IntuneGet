@@ -897,8 +897,17 @@ export const sqliteUpdatePolicies = {
         .run(
           input.policy_type,
           input.policy_type === 'pin_version' ? (input.pinned_version || null) : null,
-          input.deployment_config ? JSON.stringify(input.deployment_config) : null,
-          input.original_upload_history_id || null,
+          // A partial upsert (e.g. a policy/deferral-only save from the
+          // Inventory panel) must not wipe the saved deployment config or the
+          // upload-history link - without them auto-update fails with
+          // "No deployment configuration saved for this policy". Fall back to
+          // the existing row, same as delay_days below.
+          input.deployment_config
+            ? JSON.stringify(input.deployment_config)
+            : existing.deployment_config
+              ? JSON.stringify(existing.deployment_config)
+              : null,
+          input.original_upload_history_id || existing.original_upload_history_id || null,
           input.delay_days ?? existing.delay_days ?? 0,
           input.is_enabled ?? true ? 1 : 0,
           now,
@@ -1071,6 +1080,28 @@ export const sqliteUpdateChecks = {
       }
     });
     insertAll(rows);
+  },
+
+  /**
+   * Stamp notified_at after a notification for these rows was actually
+   * delivered, so the next check doesn't re-notify the same pending update
+   * forever (Supabase mode does this via markNotified in notify-user.ts).
+   */
+  async markNotified(userId: string, keys: Array<{ winget_id: string; intune_app_id: string }>): Promise<number> {
+    if (keys.length === 0) return 0;
+    const database = getDb();
+    const now = new Date().toISOString();
+    const stmt = database.prepare(
+      'UPDATE update_check_results SET notified_at = ?, updated_at = ? WHERE user_id = ? AND winget_id = ? AND intune_app_id = ?'
+    );
+    const run = database.transaction((items: Array<{ winget_id: string; intune_app_id: string }>) => {
+      let changed = 0;
+      for (const k of items) {
+        changed += stmt.run(now, now, userId, k.winget_id, k.intune_app_id).changes;
+      }
+      return changed;
+    });
+    return run(keys);
   },
 
   async deleteStale(userId: string, activeKeys: Set<string>): Promise<number> {

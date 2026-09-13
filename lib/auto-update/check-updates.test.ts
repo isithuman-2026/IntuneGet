@@ -45,6 +45,33 @@ describe('runUpdateCheck', () => {
     expect(row?.current_version).toBe('22.0');
   });
 
+  it('keeps the original detected_at across repeat checks of the same pending update', async () => {
+    const { sqliteDb } = await import('../db/sqlite');
+    await sqliteDb.uploadHistory.create({
+      user_id: 'user-1', winget_id: '7zip.7zip', version: '22.0',
+      display_name: '7-Zip', intune_app_id: 'intune-1', intune_tenant_id: 'tenant-1',
+    });
+
+    vi.doMock('@/lib/catalog', () => ({
+      getCatalogSource: () => ({
+        getAllLatestVersions: async () => [{ winget_id: '7zip.7zip', latest_version: '23.0' }],
+      }),
+    }));
+
+    const { runUpdateCheck } = await import('./check-updates');
+    const { sqliteUpdateChecks } = await import('../db/sqlite');
+
+    await runUpdateCheck();
+    const first = await sqliteUpdateChecks.getOne('user-1', 'tenant-1', '7zip.7zip');
+
+    await new Promise((resolve) => setTimeout(resolve, 15));
+    await runUpdateCheck();
+    const second = await sqliteUpdateChecks.getOne('user-1', 'tenant-1', '7zip.7zip');
+
+    // Re-stamping detected_at every run makes a non-zero delay_days never elapse.
+    expect(second?.detected_at).toBe(first?.detected_at);
+  });
+
   it('skips an app with an ignore policy', async () => {
     const { sqliteDb, sqliteUpdatePolicies } = await import('../db/sqlite');
     await sqliteDb.uploadHistory.create({

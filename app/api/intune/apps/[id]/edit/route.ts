@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { parseAccessToken } from '@/lib/auth-utils';
-import { isSqliteMode } from '@/lib/db';
+import { isSqliteMode, getDatabase } from '@/lib/db';
 import { sqliteUploadHistory, sqliteUpdatePolicies } from '@/lib/db/sqlite';
 import { getServicePrincipalToken } from '@/lib/intune/graph-client';
 import { assignToGroups, syncAppCategories } from '@/lib/intune-api';
@@ -112,6 +112,26 @@ export async function PATCH(
         detectionRules: body.detectionRules ?? built.deploymentConfig.detectionRules,
       };
 
+      // A one-off command/detection edit is a REDEPLOY of the version that is
+      // already out there, not a version bump - reuse the deployed version's
+      // own installer when the originating packaging job still has it. Only
+      // fall back to the catalog's latest when that installer is unavailable.
+      const priorJob = uploadHistory.packaging_job_id
+        ? await getDatabase().jobs.getById(uploadHistory.packaging_job_id)
+        : null;
+      const installerOverride = priorJob?.installer_url
+        ? {
+            version: priorJob.version,
+            installerUrl: priorJob.installer_url,
+            installerSha256: priorJob.installer_sha256 || '',
+            installerType: priorJob.installer_type || overriddenConfig.installerType,
+          }
+        : undefined;
+
+      // One-off redeploy: remember the app's real policy so the 'auto_update'
+      // needed for dispatch can be restored afterwards.
+      const priorPolicy = await sqliteUpdatePolicies.getByApp(uploadHistory.user_id, user.tenantId, uploadHistory.winget_id);
+
       const { policy } = await sqliteUpdatePolicies.upsert(uploadHistory.user_id, {
         winget_id: uploadHistory.winget_id,
         tenant_id: user.tenantId,
@@ -120,8 +140,11 @@ export async function PATCH(
         original_upload_history_id: uploadHistory.id,
       });
 
-      const versions = await getCatalogSource().getVersions(uploadHistory.winget_id);
-      const latestVersion = versions[0] ?? uploadHistory.version;
+      let latestVersion = installerOverride?.version;
+      if (!latestVersion) {
+        const versions = await getCatalogSource().getVersions(uploadHistory.winget_id);
+        latestVersion = versions[0] ?? uploadHistory.version;
+      }
       const trigger = new AutoUpdateTriggerSqlite();
       const result = await trigger.triggerAutoUpdate(policy, {
         wingetId: uploadHistory.winget_id,
@@ -130,7 +153,16 @@ export async function PATCH(
         displayName: overriddenConfig.displayName,
         currentIntuneAppId: intuneAppId,
         installerUrl: '', installerSha256: '', installerType: '',
-      }, { skipRateLimits: false, skipPriorDeploymentCheck: true });
+      }, { skipRateLimits: false, skipPriorDeploymentCheck: true, installerOverride });
+
+      const restoreType = priorPolicy?.policy_type ?? 'notify';
+      if (restoreType !== 'auto_update') {
+        await sqliteUpdatePolicies.update(policy.id, uploadHistory.user_id, {
+          policy_type: restoreType,
+          // upsert() nulls pinned_version for any non-pin policy_type
+          ...(priorPolicy?.pinned_version ? { pinned_version: priorPolicy.pinned_version } : {}),
+        });
+      }
 
       redeploy = result.success
         ? { packagingJobId: result.packagingJobId }

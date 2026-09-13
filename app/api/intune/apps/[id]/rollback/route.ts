@@ -92,6 +92,10 @@ export async function POST(
     forceCreateNewApp: true,
   };
 
+  // A rollback is a one-off action, not a policy change: remember what the
+  // app's policy was so the 'auto_update' we need for dispatch can be put back.
+  const priorPolicy = await sqliteUpdatePolicies.getByApp(uploadHistory.user_id, user.tenantId, uploadHistory.winget_id);
+
   const { policy } = await sqliteUpdatePolicies.upsert(uploadHistory.user_id, {
     winget_id: uploadHistory.winget_id,
     tenant_id: user.tenantId,
@@ -110,7 +114,30 @@ export async function POST(
     installerUrl: targetJob.installer_url || '',
     installerSha256: targetJob.installer_sha256 || '',
     installerType: targetJob.installer_type || 'exe',
-  }, { skipPriorDeploymentCheck: true });
+  }, {
+    skipPriorDeploymentCheck: true,
+    // Deploy the TARGET version's installer, not whatever the catalog
+    // currently calls latest - the old job's detection rules only match it.
+    installerOverride: {
+      version: targetJob.version,
+      installerUrl: targetJob.installer_url || '',
+      installerSha256: targetJob.installer_sha256 || '',
+      installerType: targetJob.installer_type || 'exe',
+    },
+  });
+
+  // Restore the pre-rollback policy type (or 'notify' when this app had no
+  // policy at all) so a one-off rollback never silently opts the app into
+  // automatic updates. Leaves deployment_config / last_auto_update_* as the
+  // trigger left them.
+  const restoreType = priorPolicy?.policy_type ?? 'notify';
+  if (restoreType !== 'auto_update') {
+    await sqliteUpdatePolicies.update(policy.id, uploadHistory.user_id, {
+      policy_type: restoreType,
+      // upsert() nulls pinned_version for any non-pin policy_type
+      ...(priorPolicy?.pinned_version ? { pinned_version: priorPolicy.pinned_version } : {}),
+    });
+  }
 
   if (!result.success) {
     return NextResponse.json({ error: result.error }, { status: 500 });

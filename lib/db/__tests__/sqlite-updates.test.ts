@@ -63,6 +63,26 @@ describe('sqlite update-detection schema', () => {
     expect(updated.policy_type).toBe('auto_update');
   });
 
+  it('sqliteUpdatePolicies upsert preserves deployment_config on a policy-only update', async () => {
+    const { sqliteUpdatePolicies } = await import('../sqlite');
+    const deploymentConfig = { displayName: 'VLC', publisher: 'VideoLAN', architecture: 'x64', installerType: 'exe', installCommand: 'setup.exe /S', uninstallCommand: 'uninst.exe /S', installScope: 'machine', detectionRules: [] };
+    await sqliteUpdatePolicies.upsert('user-9', {
+      winget_id: 'VideoLAN.VLC', tenant_id: 'tenant-1', policy_type: 'auto_update',
+      deployment_config: deploymentConfig, original_upload_history_id: 'hist-9',
+    });
+
+    // Policy/deferral-only save from the Inventory panel: no deployment_config
+    // in the input - it must not be nulled out.
+    const { policy } = await sqliteUpdatePolicies.upsert('user-9', {
+      winget_id: 'VideoLAN.VLC', tenant_id: 'tenant-1', policy_type: 'notify', delay_days: 7,
+    });
+
+    expect(policy.policy_type).toBe('notify');
+    expect(policy.delay_days).toBe(7);
+    expect(policy.deployment_config).toEqual(deploymentConfig);
+    expect(policy.original_upload_history_id).toBe('hist-9');
+  });
+
   it('sqliteUpdateChecks upsertMany then listByUser round-trips and deleteStale removes stale rows', async () => {
     const { sqliteUpdateChecks } = await import('../sqlite');
     const now = new Date().toISOString();

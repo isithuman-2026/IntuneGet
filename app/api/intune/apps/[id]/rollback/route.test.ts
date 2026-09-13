@@ -81,6 +81,68 @@ describe('POST /api/intune/apps/[id]/rollback', () => {
     expect(response.status).toBe(400);
   });
 
+  it('packages the ROLLBACK TARGET version and restores the prior policy_type', async () => {
+    const { sqliteDb, sqliteUpdatePolicies } = await import('@/lib/db/sqlite');
+    const { getDatabase } = await import('@/lib/db');
+    const oldJob = await getDatabase().jobs.create({
+      user_id: 'user-1', winget_id: 'Foxit.FoxitReader', version: '2026.1.3.36551',
+      display_name: 'Foxit PDF Reader', publisher: 'Foxit', architecture: 'x64',
+      installer_type: 'exe', installer_url: 'https://x/foxit-old.exe',
+      installer_sha256: 'a'.repeat(64),
+      install_command: 'old.exe /S', uninstall_command: 'olduninst.exe /S',
+      install_scope: 'machine', status: 'deployed',
+    });
+    await sqliteDb.uploadHistory.create({
+      user_id: 'user-1', winget_id: 'Foxit.FoxitReader', version: '2026.2.0.39747',
+      display_name: 'Foxit PDF Reader', intune_app_id: 'app-abc', intune_tenant_id: 'tenant-1',
+    });
+    await sqliteUpdatePolicies.upsert('user-1', {
+      winget_id: 'Foxit.FoxitReader', tenant_id: 'tenant-1', policy_type: 'notify',
+    });
+
+    vi.doMock('@/lib/intune-api', () => ({
+      getAppAssignments: vi.fn().mockResolvedValue([]),
+      getAppCategories: vi.fn().mockResolvedValue([]),
+    }));
+    vi.doMock('@/lib/github-actions', () => ({
+      isGitHubActionsConfigured: () => false,
+      triggerPackagingWorkflow: vi.fn(),
+    }));
+    // Catalog latest is NEWER than the rollback target - the old bug packaged
+    // this version with the old job's detection rules.
+    vi.doMock('@/lib/auto-update/trigger', async (importOriginal) => {
+      const actual = await importOriginal<typeof import('@/lib/auto-update/trigger')>();
+      return {
+        ...actual,
+        getLatestInstallerInfo: vi.fn().mockResolvedValue({
+          ok: true,
+          info: { installerUrl: 'https://x/foxit-new.exe', installerSha256: 'b'.repeat(64), installerType: 'exe', latestVersion: '2026.2.0.39747' },
+        }),
+      };
+    });
+
+    const { POST } = await import('./route');
+    const response = await POST(
+      new Request('http://x/api/intune/apps/app-abc/rollback', {
+        method: 'POST',
+        headers: { Authorization: 'Bearer x', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ packagingJobId: oldJob.id }),
+      }),
+      { params: Promise.resolve({ id: 'app-abc' }) }
+    );
+
+    expect(response.status).toBe(200);
+    const { packagingJobId } = await response.json();
+    const newJob = await getDatabase().jobs.getById(packagingJobId);
+    expect(newJob?.version).toBe('2026.1.3.36551');
+    expect(newJob?.installer_url).toBe('https://x/foxit-old.exe');
+
+    // A one-off rollback must not leave the app on auto_update.
+    const policy = await sqliteUpdatePolicies.getByApp('user-1', 'tenant-1', 'Foxit.FoxitReader');
+    expect(policy?.policy_type).toBe('notify');
+    expect(policy?.deployment_config).toBeTruthy();
+  });
+
   it('dispatches a rollback to the older packaging_jobs row', async () => {
     const { sqliteDb } = await import('@/lib/db/sqlite');
     const { getDatabase } = await import('@/lib/db');
@@ -121,4 +183,5 @@ describe('POST /api/intune/apps/[id]/rollback', () => {
     const body = await response.json();
     expect(body.packagingJobId).toBe('rollback-job-id');
   });
+
 });

@@ -25,6 +25,21 @@ import {
 import { getLatestInstallerInfo, type TriggerResult, type UpdateInfo } from './trigger';
 import type { Json } from '@/types/database';
 
+/**
+ * Caller-supplied installer tuple. When present, triggerAutoUpdate skips the
+ * getLatestInstallerInfo catalog lookup (which always resolves the CATALOG's
+ * current latest version) and packages exactly this version/installer.
+ * Used by rollback and the Inventory edit redeploy, which already know the
+ * exact artifact they want deployed.
+ */
+export interface InstallerOverride {
+  version: string;
+  installerUrl: string;
+  installerSha256: string;
+  installerType: string;
+  silentSwitches?: string;
+}
+
 export class AutoUpdateTriggerSqlite {
   private safetyConfig: AutoUpdateSafetyConfig;
 
@@ -35,7 +50,11 @@ export class AutoUpdateTriggerSqlite {
   async triggerAutoUpdate(
     policy: AppUpdatePolicy,
     updateInfo: UpdateInfo,
-    options?: { skipRateLimits?: boolean; skipPriorDeploymentCheck?: boolean }
+    options?: {
+      skipRateLimits?: boolean;
+      skipPriorDeploymentCheck?: boolean;
+      installerOverride?: InstallerOverride;
+    }
   ): Promise<TriggerResult> {
     if (!canAutoUpdate(policy)) {
       return { success: false, skipped: true, skipReason: 'Policy does not allow auto-update or is disabled' };
@@ -79,21 +98,34 @@ export class AutoUpdateTriggerSqlite {
 
     let jobId: string | undefined;
     try {
-      const installerResolution = await getLatestInstallerInfo(
-        undefined,
-        updateInfo.wingetId,
-        (policy.deployment_config as DeploymentConfig).architecture,
-        (policy.deployment_config as DeploymentConfig).installScope
-      );
-      if (!installerResolution.ok) {
-        await sqliteUpdatePolicies.incrementFailureCount(policy.id);
-        await sqliteAutoUpdateHistory.updateStatus(historyId, 'failed', {
-          errorMessage: installerResolution.failure.message,
-          completedAt: new Date().toISOString(),
-        });
-        return { success: false, error: installerResolution.failure.message, historyId };
+      let installerInfo: UpdateInfo;
+      if (options?.installerOverride) {
+        const override = options.installerOverride;
+        installerInfo = {
+          ...updateInfo,
+          latestVersion: override.version,
+          installerUrl: override.installerUrl,
+          installerSha256: override.installerSha256,
+          installerType: override.installerType,
+          silentSwitches: override.silentSwitches,
+        };
+      } else {
+        const installerResolution = await getLatestInstallerInfo(
+          undefined,
+          updateInfo.wingetId,
+          (policy.deployment_config as DeploymentConfig).architecture,
+          (policy.deployment_config as DeploymentConfig).installScope
+        );
+        if (!installerResolution.ok) {
+          await sqliteUpdatePolicies.incrementFailureCount(policy.id);
+          await sqliteAutoUpdateHistory.updateStatus(historyId, 'failed', {
+            errorMessage: installerResolution.failure.message,
+            completedAt: new Date().toISOString(),
+          });
+          return { success: false, error: installerResolution.failure.message, historyId };
+        }
+        installerInfo = { ...installerResolution.info, currentVersion: updateInfo.currentVersion };
       }
-      const installerInfo = { ...installerResolution.info, currentVersion: updateInfo.currentVersion };
 
       const deploymentConfig = policy.deployment_config as DeploymentConfig;
       const db = getDatabase();

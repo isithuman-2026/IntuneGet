@@ -74,8 +74,13 @@ export async function runUpdateCheck(): Promise<RunUpdateCheckResult> {
         const isCritical = latestParsed.major > currentParsed.major;
 
         const prior = await sqliteUpdateChecks.getOne(userId, tenantId, app.winget_id);
-        const notifiedAt = prior && prior.latest_version === latestVersion ? prior.notified_at : null;
+        const samePending = Boolean(prior && prior.latest_version === latestVersion);
+        const notifiedAt = samePending ? prior!.notified_at : null;
         const now = new Date().toISOString();
+        // Keep the ORIGINAL detection timestamp while the same update is still
+        // pending. Re-stamping it every check makes delay_days never elapse
+        // (runAutoUpdatesForNewDetections measures the deferral from here).
+        const detectedAt = samePending ? prior!.detected_at : now;
 
         allUpdates.push({
           user_id: userId,
@@ -88,7 +93,7 @@ export async function runUpdateCheck(): Promise<RunUpdateCheckResult> {
           is_critical: isCritical,
           is_managed: true,
           notified_at: notifiedAt,
-          detected_at: now,
+          detected_at: detectedAt,
           updated_at: now,
         });
         activeKeys.add(`${app.winget_id}:${app.intune_app_id}`);
@@ -120,8 +125,19 @@ export async function runUpdateCheck(): Promise<RunUpdateCheckResult> {
         updates: userUpdates.map((u) => ({ app_name: u.display_name, winget_id: u.winget_id, intune_app_id: u.intune_app_id, current_version: u.current_version, latest_version: u.latest_version, is_critical: u.is_critical })),
         summary: { total: userUpdates.length, critical: userUpdates.filter((u) => u.is_critical).length },
       };
+      let delivered = false;
       for (const webhook of webhooks) {
-        await deliverWebhook(webhook, payload).catch((err) => errors.push(`Webhook to ${webhook.name} failed: ${err instanceof Error ? err.message : String(err)}`));
+        const result = await deliverWebhook(webhook, payload).catch((err) => {
+          errors.push(`Webhook to ${webhook.name} failed: ${err instanceof Error ? err.message : String(err)}`);
+          return { success: false };
+        });
+        delivered = delivered || result.success;
+      }
+      if (delivered) {
+        await sqliteUpdateChecks.markNotified(
+          userId,
+          userUpdates.map((u) => ({ winget_id: u.winget_id, intune_app_id: u.intune_app_id }))
+        );
       }
     }
   }

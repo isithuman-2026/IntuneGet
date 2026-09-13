@@ -225,6 +225,48 @@ describe('AutoUpdateTriggerSqlite', () => {
     );
   });
 
+  it('packages the caller-supplied override version, not the catalog latest (rollback)', async () => {
+    vi.doMock('@/lib/intune/graph-client', () => ({
+      getServicePrincipalToken: vi.fn().mockResolvedValue('fake-token'),
+    }));
+    vi.doMock('@/lib/github-actions', () => ({
+      isGitHubActionsConfigured: () => false,
+      triggerPackagingWorkflow: vi.fn(),
+    }));
+    const getLatestInstallerInfo = vi.fn().mockResolvedValue({
+      ok: true,
+      info: { installerUrl: 'https://x/new.exe', installerSha256: 'b'.repeat(64), installerType: 'exe', latestVersion: '23.0' },
+    });
+    vi.doMock('./trigger', async (importOriginal) => {
+      const actual = await importOriginal<typeof import('./trigger')>();
+      return { ...actual, getLatestInstallerInfo };
+    });
+
+    const { sqliteUpdatePolicies } = await import('../db/sqlite');
+    const { policy } = await sqliteUpdatePolicies.upsert('user-1', {
+      winget_id: '7zip.7zip', tenant_id: 'tenant-1', policy_type: 'auto_update',
+      original_upload_history_id: 'hist-1',
+      deployment_config: { displayName: '7-Zip', publisher: '7-Zip', architecture: 'x64', installerType: 'exe', installCommand: 'x', uninstallCommand: 'x', installScope: 'machine', detectionRules: [] },
+    });
+
+    const { AutoUpdateTriggerSqlite } = await import('./trigger-sqlite');
+    const result = await new AutoUpdateTriggerSqlite().triggerAutoUpdate(policy, {
+      wingetId: '7zip.7zip', currentVersion: '23.0', latestVersion: '21.0',
+      displayName: '7-Zip', installerUrl: '', installerSha256: '', installerType: '',
+    }, {
+      skipPriorDeploymentCheck: true,
+      installerOverride: { version: '21.0', installerUrl: 'https://x/old.exe', installerSha256: 'a'.repeat(64), installerType: 'exe' },
+    });
+
+    expect(result.success).toBe(true);
+    expect(getLatestInstallerInfo).not.toHaveBeenCalled();
+
+    const { getDatabase } = await import('../db');
+    const job = await getDatabase().jobs.getById(result.packagingJobId!);
+    expect(job?.version).toBe('21.0');
+    expect(job?.installer_url).toBe('https://x/old.exe');
+  });
+
   it('defaults autoSupersede/carryOverAssignments to false when the setting is unset', async () => {
     const { sqliteUpdatePolicies } = await import('../db/sqlite');
     const { policy } = await sqliteUpdatePolicies.upsert('user-2', {
