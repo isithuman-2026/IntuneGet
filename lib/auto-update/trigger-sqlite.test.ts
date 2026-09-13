@@ -161,4 +161,117 @@ describe('AutoUpdateTriggerSqlite', () => {
     const newJob = await getDatabase().jobs.getByStatus('failed', 10);
     expect(newJob.some((j) => j.winget_id === '7zip.7zip' && j.version === '23.0')).toBe(true);
   });
+
+  it('passes supersedence and assignment-carryover fields when supersedePreviousApp is enabled and a currentIntuneAppId is known', async () => {
+    const { sqliteUpdatePolicies, sqliteUserSettings } = await import('../db/sqlite');
+    await sqliteUserSettings.upsert('user-1', {
+      carryOverAssignments: true,
+      supersedePreviousApp: true,
+    });
+    const { policy } = await sqliteUpdatePolicies.upsert('user-1', {
+      winget_id: 'VideoLAN.VLC',
+      tenant_id: 'tenant-1',
+      policy_type: 'auto_update',
+      deployment_config: {
+        displayName: 'VLC', publisher: 'VideoLAN', architecture: 'x64',
+        installerType: 'exe', installCommand: 'x', uninstallCommand: 'x',
+        installScope: 'machine', detectionRules: [],
+        assignments: [{ '@odata.type': '#microsoft.graph.mobileAppAssignment', intent: 'available', target: { '@odata.type': '#microsoft.graph.allDevicesAssignmentTarget' } }],
+        categories: [{ id: 'cat-1', displayName: 'Utilities' }],
+      },
+      original_upload_history_id: 'hist-1',
+    });
+
+    vi.doMock('@/lib/intune/graph-client', () => ({
+      getServicePrincipalToken: vi.fn().mockResolvedValue('fake-token'),
+    }));
+    vi.doMock('@/lib/github-actions', () => ({
+      isGitHubActionsConfigured: () => true,
+      triggerPackagingWorkflow: vi.fn().mockResolvedValue({ success: true }),
+    }));
+    vi.doMock('./trigger', async (importOriginal) => {
+      const actual = await importOriginal<typeof import('./trigger')>();
+      return {
+        ...actual,
+        getLatestInstallerInfo: vi.fn().mockResolvedValue({
+          ok: true,
+          info: { installerUrl: 'https://x/vlc.exe', installerSha256: 'abc', installerType: 'exe', silentSwitches: '', latestVersion: '3.0.23' },
+        }),
+      };
+    });
+
+    const { AutoUpdateTriggerSqlite } = await import('./trigger-sqlite');
+    const trigger = new AutoUpdateTriggerSqlite();
+    await trigger.triggerAutoUpdate(policy, {
+      wingetId: 'VideoLAN.VLC',
+      currentVersion: '3.0.22',
+      latestVersion: '3.0.23',
+      displayName: 'VLC',
+      installerUrl: '', installerSha256: '', installerType: '',
+      currentIntuneAppId: 'existing-app-id-123',
+    });
+
+    const { triggerPackagingWorkflow } = await import('@/lib/github-actions');
+    expect(triggerPackagingWorkflow).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sourceIntuneAppId: 'existing-app-id-123',
+        autoSupersede: true,
+        supersedenceType: 'update',
+        carryOverAssignments: true,
+        removeAssignmentsFromPreviousApp: true,
+        assignments: JSON.stringify([{ '@odata.type': '#microsoft.graph.mobileAppAssignment', intent: 'available', target: { '@odata.type': '#microsoft.graph.allDevicesAssignmentTarget' } }]),
+        categories: JSON.stringify([{ id: 'cat-1', displayName: 'Utilities' }]),
+      })
+    );
+  });
+
+  it('defaults autoSupersede/carryOverAssignments to false when the setting is unset', async () => {
+    const { sqliteUpdatePolicies } = await import('../db/sqlite');
+    const { policy } = await sqliteUpdatePolicies.upsert('user-2', {
+      winget_id: '7zip.7zip',
+      tenant_id: 'tenant-1',
+      policy_type: 'auto_update',
+      deployment_config: {
+        displayName: '7-Zip', publisher: '7-Zip', architecture: 'x64',
+        installerType: 'exe', installCommand: 'x', uninstallCommand: 'x',
+        installScope: 'machine', detectionRules: [],
+      },
+      original_upload_history_id: 'hist-2',
+    });
+
+    vi.doMock('@/lib/intune/graph-client', () => ({
+      getServicePrincipalToken: vi.fn().mockResolvedValue('fake-token'),
+    }));
+    vi.doMock('@/lib/github-actions', () => ({
+      isGitHubActionsConfigured: () => true,
+      triggerPackagingWorkflow: vi.fn().mockResolvedValue({ success: true }),
+    }));
+    vi.doMock('./trigger', async (importOriginal) => {
+      const actual = await importOriginal<typeof import('./trigger')>();
+      return {
+        ...actual,
+        getLatestInstallerInfo: vi.fn().mockResolvedValue({
+          ok: true,
+          info: { installerUrl: 'https://x/7z.exe', installerSha256: 'abc', installerType: 'exe', silentSwitches: '', latestVersion: '23.0' },
+        }),
+      };
+    });
+
+    const { AutoUpdateTriggerSqlite } = await import('./trigger-sqlite');
+    const trigger = new AutoUpdateTriggerSqlite();
+    await trigger.triggerAutoUpdate(policy, {
+      wingetId: '7zip.7zip', currentVersion: '22.0', latestVersion: '23.0',
+      displayName: '7-Zip', installerUrl: '', installerSha256: '', installerType: '',
+      currentIntuneAppId: 'some-app-id',
+    });
+
+    const { triggerPackagingWorkflow } = await import('@/lib/github-actions');
+    expect(triggerPackagingWorkflow).toHaveBeenCalledWith(
+      expect.objectContaining({
+        autoSupersede: false,
+        carryOverAssignments: false,
+        removeAssignmentsFromPreviousApp: false,
+      })
+    );
+  });
 });

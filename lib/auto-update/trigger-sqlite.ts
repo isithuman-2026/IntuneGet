@@ -9,6 +9,7 @@
 import {
   sqliteUpdatePolicies,
   sqliteAutoUpdateHistory,
+  sqliteUserSettings,
   type UpdateCheckInsert,
 } from '@/lib/db/sqlite';
 import { getDatabase } from '@/lib/db';
@@ -73,6 +74,9 @@ export class AutoUpdateTriggerSqlite {
       updateType
     );
 
+    const { carryOverAssignments, supersedePreviousApp } = await sqliteUserSettings.get(policy.user_id) ?? { carryOverAssignments: false, supersedePreviousApp: false };
+    const autoSupersede = supersedePreviousApp && Boolean(updateInfo.currentIntuneAppId);
+
     let jobId: string | undefined;
     try {
       const installerResolution = await getLatestInstallerInfo(
@@ -136,6 +140,13 @@ export class AutoUpdateTriggerSqlite {
           psadtConfig: deploymentConfig.psadtConfig ? JSON.stringify(deploymentConfig.psadtConfig) : undefined,
           installScope: (deploymentConfig.installScope === 'user' ? 'user' : 'machine') as 'machine' | 'user',
           forceCreate: deploymentConfig.forceCreateNewApp !== false,
+          assignments: deploymentConfig.assignments ? JSON.stringify(deploymentConfig.assignments) : undefined,
+          categories: deploymentConfig.categories ? JSON.stringify(deploymentConfig.categories) : undefined,
+          sourceIntuneAppId: updateInfo.currentIntuneAppId,
+          autoSupersede,
+          supersedenceType: autoSupersede ? 'update' : undefined,
+          carryOverAssignments,
+          removeAssignmentsFromPreviousApp: carryOverAssignments,
         });
       }
 
@@ -224,6 +235,7 @@ export async function runAutoUpdatesForNewDetections(
       currentVersion: update.current_version,
       latestVersion: update.latest_version,
       displayName: update.display_name,
+      currentIntuneAppId: update.intune_app_id,
       // Required by UpdateInfo's type but unused dead parameters here:
       // triggerAutoUpdate re-resolves the installer itself via
       // getLatestInstallerInfo(undefined, updateInfo.wingetId, ...), it never
