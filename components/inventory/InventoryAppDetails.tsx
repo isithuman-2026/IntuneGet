@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { SlidePanel } from '@/components/dashboard/animations/SlidePanel';
 import { useAppDetails } from '@/hooks/use-inventory';
 import { useEditApp } from '@/hooks/use-inventory-edit';
+import { useAppVersionHistory, useRollbackApp } from '@/hooks/use-app-version-history';
 import type { IntuneAppAssignment } from '@/types/inventory';
 import type { UpdatePolicyType } from '@/types/update-policies';
 
@@ -26,6 +27,8 @@ export function InventoryAppDetails({ appId, onClose, onUpdate }: InventoryAppDe
   const [editedInstallCommand, setEditedInstallCommand] = useState('');
   const [editedUninstallCommand, setEditedUninstallCommand] = useState('');
   const editApp = useEditApp(appId || '');
+  const { data: versionHistory } = useAppVersionHistory(data?.hasUploadHistory ? appId : null);
+  const rollback = useRollbackApp(appId || '');
 
   useEffect(() => {
     setEditedPolicyType(data?.policy?.policyType ?? 'notify');
@@ -301,6 +304,35 @@ export function InventoryAppDetails({ appId, onClose, onUpdate }: InventoryAppDe
                     </div>
                   );
                 })}
+              </div>
+            </div>
+          )}
+
+          {/* Version History */}
+          {versionHistory && versionHistory.versions.length > 0 && (
+            <div>
+              <h4 className="text-xs font-medium text-text-muted uppercase tracking-wider mb-3">
+                Version History
+              </h4>
+              <div className="space-y-2">
+                {versionHistory.versions.map((v) => (
+                  <div key={v.id} className="flex items-center justify-between p-3 bg-bg-elevated rounded-lg border border-overlay/5">
+                    <span className="text-sm text-text-primary">v{v.version}</span>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={rollback.isPending}
+                      onClick={() => {
+                        const confirmed = window.confirm(
+                          `Roll back to v${v.version}? This redeploys that version's exact installer with current assignments.`
+                        );
+                        if (confirmed) rollback.mutate({ packagingJobId: v.id });
+                      }}
+                    >
+                      Roll back to this version
+                    </Button>
+                  </div>
+                ))}
               </div>
             </div>
           )}
