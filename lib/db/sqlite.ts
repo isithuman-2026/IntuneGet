@@ -11,7 +11,7 @@ import type { WebhookConfiguration, WebhookConfigurationInput, WebhookConfigurat
 import type { ClaimedApp } from '@/types/unmanaged';
 import type { AppUpdatePolicy, AppUpdatePolicyInput } from '@/types/update-policies';
 import type { UserSettings } from '@/types/user-settings';
-import { DEFAULT_USER_SETTINGS } from '@/types/user-settings';
+import { DEFAULT_USER_SETTINGS } from '../../types/user-settings.ts';
 
 export interface NotificationPreferencesRow {
   id: string;
