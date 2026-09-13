@@ -108,12 +108,11 @@ export function Sidebar({ user, onSignOut }: SidebarProps) {
 
   // NEXT_PUBLIC_DISABLE_SCCM=true hides the SCCM Migration nav item
   const { sccm: sccmEnabled, hostedServices } = getClientFeatureFlags();
-  const managementItems = sccmEnabled
+  // App Updates works in both Supabase and SQLite mode (SQLite mode added
+  // 2026-09-12) - no longer gated behind hostedServices.
+  const visibleManagementItems = sccmEnabled
     ? managementNav
     : managementNav.filter((item) => item.href !== '/dashboard/sccm');
-  const visibleManagementItems = hostedServices
-    ? managementItems
-    : managementItems.filter((item) => item.href !== '/dashboard/updates');
 
   const navGroups: NavGroup[] = [
     { items: coreNav },
