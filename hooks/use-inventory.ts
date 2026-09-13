@@ -12,6 +12,7 @@ interface InventoryResponse {
 
 interface AppDetailsResponse {
   app: IntuneAppWithAssignments;
+  hasUploadHistory: boolean;
 }
 
 export function useInventoryApps() {

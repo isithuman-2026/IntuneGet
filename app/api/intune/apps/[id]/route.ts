@@ -8,6 +8,8 @@ import { getServerClientOrNull } from '@/lib/supabase';
 import { resolveTargetTenantId } from '@/lib/msp/tenant-resolution';
 import { parseAccessToken } from '@/lib/auth-utils';
 import { getServicePrincipalToken } from '@/lib/intune/graph-client';
+import { isSqliteMode } from '@/lib/db';
+import { sqliteUploadHistory } from '@/lib/db/sqlite';
 import type { IntuneAppWithAssignments, IntuneAppAssignment } from '@/types/inventory';
 
 const GRAPH_API_BASE = 'https://graph.microsoft.com/beta';
@@ -100,7 +102,11 @@ export async function GET(
       assignments,
     };
 
-    return NextResponse.json({ app });
+    const hasUploadHistory = isSqliteMode()
+      ? Boolean(await sqliteUploadHistory.getLatestByIntuneAppId(tenantId, id))
+      : false;
+
+    return NextResponse.json({ app, hasUploadHistory });
   } catch {
     return NextResponse.json(
       { error: 'Failed to fetch app details' },

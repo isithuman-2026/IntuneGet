@@ -1,11 +1,14 @@
 'use client';
 
+import { useState } from 'react';
 import { Package, Calendar, User, AlertCircle, Loader2, Search, RefreshCw, ExternalLink, Users } from 'lucide-react';
 import { CopyableCommand } from './CopyableCommand';
 import { Button } from '@/components/ui/button';
 import { SlidePanel } from '@/components/dashboard/animations/SlidePanel';
 import { useAppDetails } from '@/hooks/use-inventory';
+import { useEditApp } from '@/hooks/use-inventory-edit';
 import type { IntuneAppAssignment } from '@/types/inventory';
+import type { UpdatePolicyType } from '@/types/update-policies';
 
 interface InventoryAppDetailsProps {
   appId: string | null;
@@ -16,6 +19,11 @@ interface InventoryAppDetailsProps {
 export function InventoryAppDetails({ appId, onClose, onUpdate }: InventoryAppDetailsProps) {
   const { data, isLoading, error, refetch } = useAppDetails(appId);
   const app = data?.app;
+
+  const [isEditing, setIsEditing] = useState(false);
+  const [editedPolicyType, setEditedPolicyType] = useState<UpdatePolicyType>('notify');
+  const [editedDelayDays, setEditedDelayDays] = useState(0);
+  const editApp = useEditApp(appId || '');
 
   const formatDate = (dateString: string) => {
     return new Date(dateString).toLocaleDateString('en-US', {
@@ -76,6 +84,16 @@ export function InventoryAppDetails({ appId, onClose, onUpdate }: InventoryAppDe
       >
         <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />
       </Button>
+      {data?.hasUploadHistory && (
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => setIsEditing((v) => !v)}
+          className="text-text-secondary hover:text-text-primary flex-shrink-0"
+        >
+          {isEditing ? 'Done' : 'Edit'}
+        </Button>
+      )}
     </div>
   ) : undefined;
 
@@ -131,6 +149,47 @@ export function InventoryAppDetails({ appId, onClose, onUpdate }: InventoryAppDe
                 Description
               </h4>
               <p className="text-sm text-text-secondary leading-relaxed">{app.description}</p>
+            </div>
+          )}
+
+          {/* Update Policy (editable) */}
+          {isEditing && (
+            <div>
+              <h4 className="text-xs font-medium text-text-muted uppercase tracking-wider mb-3">
+                Update Policy
+              </h4>
+              <div className="flex items-center gap-3">
+                <select
+                  value={editedPolicyType}
+                  onChange={(e) => setEditedPolicyType(e.target.value as UpdatePolicyType)}
+                  className="flex-1 bg-bg-elevated border border-overlay/10 rounded-lg px-3 py-2 text-sm text-text-primary"
+                >
+                  <option value="notify">Notify</option>
+                  <option value="auto_update">Auto Update</option>
+                  <option value="pin_version">Pin Version</option>
+                  <option value="ignore">Ignore</option>
+                </select>
+                {editedPolicyType === 'auto_update' && (
+                  <input
+                    type="number"
+                    min={0}
+                    value={editedDelayDays}
+                    onChange={(e) => setEditedDelayDays(Number(e.target.value))}
+                    className="w-24 bg-bg-elevated border border-overlay/10 rounded-lg px-3 py-2 text-sm text-text-primary"
+                    placeholder="Delay days"
+                  />
+                )}
+              </div>
+              <Button
+                onClick={() => editApp.mutate({ policyType: editedPolicyType, delayDays: editedDelayDays })}
+                disabled={editApp.isPending}
+                className="w-full mt-3 bg-accent-cyan hover:bg-accent-cyan-bright text-white"
+              >
+                {editApp.isPending ? 'Saving...' : 'Save'}
+              </Button>
+              {editApp.isError && (
+                <p className="text-sm text-status-error mt-2">{editApp.error.message}</p>
+              )}
             </div>
           )}
 
