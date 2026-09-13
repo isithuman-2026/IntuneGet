@@ -303,7 +303,11 @@ Same route, redeploy-path fields (`installCommand`, `uninstallCommand`,
 - [ ] Inventory app details panel shows an Edit toggle only for apps with
       upload history; other apps stay fully read-only.
 - [ ] Assignment/category/notification/policy/deferral edits save without
-      triggering a rebuild.
+      triggering a rebuild, at the API layer (backend). The Inventory-view
+      UI for policy/deferral ships with the first implementation plan;
+      full assignment/category picker UI is a fast-follow (planning found
+      it to be a group-picker surface too large for one bite-sized task
+      alongside everything else here — see that plan's Scope Note).
 - [ ] Install command/uninstall command/detection rule edits require
       explicit "Save & Redeploy" confirmation and produce a new packaging
       job + supersedence, same as an auto-update.
