@@ -334,6 +334,9 @@ export function InventoryAppDetails({ appId, onClose, onUpdate }: InventoryAppDe
                   </div>
                 ))}
               </div>
+              {rollback.isError && (
+                <p className="text-sm text-status-error mt-2">{rollback.error.message}</p>
+              )}
             </div>
           )}
 
