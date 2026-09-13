@@ -30,6 +30,8 @@ export function InventoryAppDetails({ appId, onClose, onUpdate }: InventoryAppDe
   useEffect(() => {
     setEditedPolicyType(data?.policy?.policyType ?? 'notify');
     setEditedDelayDays(data?.policy?.delayDays ?? 0);
+    setEditedInstallCommand('');
+    setEditedUninstallCommand('');
   }, [data]);
 
   const formatDate = (dateString: string) => {
