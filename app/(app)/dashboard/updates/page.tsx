@@ -203,7 +203,7 @@ export default function UpdatesPage() {
 
   // Update type counts for filter
   const updateTypeCounts = useMemo(() => {
-    const counts = { major: 0, minor: 0, patch: 0 };
+    const counts = { major: 0, minor: 0, patch: 0, rollback: 0 };
     for (const u of updates) {
       const type = classifyUpdateType(u.current_version, u.latest_version);
       counts[type]++;

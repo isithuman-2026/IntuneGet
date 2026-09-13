@@ -10,6 +10,7 @@ import {
   DeploymentConfig,
   AutoUpdateSafetyConfig,
   DEFAULT_SAFETY_CONFIG,
+  UpdateType,
   classifyUpdateType,
   canAutoUpdate,
 } from '@/types/update-policies';
@@ -454,7 +455,7 @@ export class AutoUpdateTrigger {
   private async createHistoryRecord(
     policyId: string,
     updateInfo: UpdateInfo,
-    updateType: 'patch' | 'minor' | 'major'
+    updateType: UpdateType
   ): Promise<{ id: string }> {
     const { data, error } = await this.supabase
       .from('auto_update_history')
