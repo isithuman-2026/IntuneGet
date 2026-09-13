@@ -4,7 +4,10 @@ import { isSqliteMode } from '@/lib/db';
 import { sqliteUploadHistory, sqliteUpdatePolicies } from '@/lib/db/sqlite';
 import { getServicePrincipalToken } from '@/lib/intune/graph-client';
 import { assignToGroups, syncAppCategories } from '@/lib/intune-api';
-import type { Win32LobAppAssignment } from '@/types/intune';
+import { buildDeploymentConfigForApp } from '@/lib/update-policies/build-deployment-config';
+import { AutoUpdateTriggerSqlite } from '@/lib/auto-update/trigger-sqlite';
+import { getCatalogSource } from '@/lib/catalog';
+import type { Win32LobAppAssignment, DetectionRule } from '@/types/intune';
 import type { UpdatePolicyType } from '@/types/update-policies';
 
 interface EditAppRequest {
@@ -12,6 +15,10 @@ interface EditAppRequest {
   categories?: { id: string }[];
   policyType?: UpdatePolicyType;
   delayDays?: number;
+  installCommand?: string;
+  uninstallCommand?: string;
+  detectionRules?: DetectionRule[];
+  confirmRedeploy?: boolean;
 }
 
 type FieldResult = 'ok' | { error: string };
@@ -77,5 +84,59 @@ export async function PATCH(
     }
   }
 
-  return NextResponse.json({ results });
+  const hasPackageEdit = body.installCommand !== undefined || body.uninstallCommand !== undefined || body.detectionRules !== undefined;
+  let redeploy: { packagingJobId?: string; error?: string } | undefined;
+
+  if (hasPackageEdit) {
+    if (!body.confirmRedeploy) {
+      return NextResponse.json(
+        { error: 'confirmRedeploy must be true to change install command, uninstall command, or detection rules' },
+        { status: 400 }
+      );
+    }
+
+    const built = await buildDeploymentConfigForApp({
+      userId: uploadHistory.user_id,
+      tenantId: user.tenantId,
+      wingetId: uploadHistory.winget_id,
+      latestVersion: uploadHistory.version,
+    });
+
+    if (built.status !== 'ok') {
+      redeploy = { error: `Could not resolve current deployment config (${built.status})` };
+    } else {
+      const overriddenConfig = {
+        ...built.deploymentConfig,
+        installCommand: body.installCommand ?? built.deploymentConfig.installCommand,
+        uninstallCommand: body.uninstallCommand ?? built.deploymentConfig.uninstallCommand,
+        detectionRules: body.detectionRules ?? built.deploymentConfig.detectionRules,
+      };
+
+      const { policy } = await sqliteUpdatePolicies.upsert(uploadHistory.user_id, {
+        winget_id: uploadHistory.winget_id,
+        tenant_id: user.tenantId,
+        policy_type: 'auto_update',
+        deployment_config: overriddenConfig,
+        original_upload_history_id: uploadHistory.id,
+      });
+
+      const versions = await getCatalogSource().getVersions(uploadHistory.winget_id);
+      const latestVersion = versions[0] ?? uploadHistory.version;
+      const trigger = new AutoUpdateTriggerSqlite();
+      const result = await trigger.triggerAutoUpdate(policy, {
+        wingetId: uploadHistory.winget_id,
+        currentVersion: uploadHistory.version,
+        latestVersion,
+        displayName: overriddenConfig.displayName,
+        currentIntuneAppId: intuneAppId,
+        installerUrl: '', installerSha256: '', installerType: '',
+      }, { skipRateLimits: false, skipPriorDeploymentCheck: true });
+
+      redeploy = result.success
+        ? { packagingJobId: result.packagingJobId }
+        : { error: result.error };
+    }
+  }
+
+  return NextResponse.json({ results, ...(redeploy ? { redeploy } : {}) });
 }

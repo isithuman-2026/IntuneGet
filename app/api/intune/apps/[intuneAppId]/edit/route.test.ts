@@ -109,4 +109,60 @@ describe('PATCH /api/intune/apps/[intuneAppId]/edit - instant path', () => {
     expect(body.results.assignments).toEqual({ error: 'Failed to assign app to groups' });
     expect(body.results.categories).toBe('ok');
   });
+
+  it('rejects a redeploy-path edit without confirmRedeploy', async () => {
+    const { sqliteDb } = await import('@/lib/db/sqlite');
+    await sqliteDb.uploadHistory.create({
+      user_id: 'user-1', winget_id: 'Foxit.FoxitReader', version: '2026.1.3.36551',
+      display_name: 'Foxit PDF Reader', intune_app_id: 'app-abc', intune_tenant_id: 'tenant-1',
+    });
+
+    const { PATCH } = await import('./route');
+    const response = await PATCH(
+      new Request('http://x/api/intune/apps/app-abc/edit', {
+        method: 'PATCH',
+        headers: { Authorization: 'Bearer x', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ installCommand: 'newinstall.exe /S' }),
+      }),
+      { params: Promise.resolve({ intuneAppId: 'app-abc' }) }
+    );
+    expect(response.status).toBe(400);
+  });
+
+  it('dispatches a redeploy when confirmRedeploy is true', async () => {
+    const { sqliteDb } = await import('@/lib/db/sqlite');
+    const job = await sqliteDb.jobs.create({
+      user_id: 'user-1', winget_id: 'Foxit.FoxitReader', version: '2026.1.3.36551',
+      display_name: 'Foxit PDF Reader', publisher: 'Foxit', architecture: 'x64',
+      installer_type: 'exe', installer_url: 'https://x/foxit.exe',
+      install_command: 'old.exe /S', uninstall_command: 'olduninst.exe /S',
+      install_scope: 'machine', status: 'deployed',
+    });
+    await sqliteDb.uploadHistory.create({
+      user_id: 'user-1', winget_id: 'Foxit.FoxitReader', version: '2026.1.3.36551',
+      display_name: 'Foxit PDF Reader', intune_app_id: 'app-abc', intune_tenant_id: 'tenant-1',
+      packaging_job_id: job.id,
+    });
+
+    vi.doMock('@/lib/auto-update/trigger-sqlite', () => ({
+      AutoUpdateTriggerSqlite: class {
+        async triggerAutoUpdate() {
+          return { success: true, packagingJobId: 'new-job-id' };
+        }
+      },
+    }));
+
+    const { PATCH } = await import('./route');
+    const response = await PATCH(
+      new Request('http://x/api/intune/apps/app-abc/edit', {
+        method: 'PATCH',
+        headers: { Authorization: 'Bearer x', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ installCommand: 'newinstall.exe /S', confirmRedeploy: true }),
+      }),
+      { params: Promise.resolve({ intuneAppId: 'app-abc' }) }
+    );
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.redeploy.packagingJobId).toBe('new-job-id');
+  });
 });
