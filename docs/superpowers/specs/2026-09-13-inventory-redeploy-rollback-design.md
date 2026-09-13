@@ -1,6 +1,16 @@
 # Inventory Edit-and-Redeploy + Rollback (SQLite Mode)
 
-Status: approved design, not yet planned/implemented.
+Status: implemented 2026-09-13. Goals 0-1 (Cart Behaviour settings fix +
+supersedence wiring) verified end-to-end on the lab tenant: real Microsoft
+Graph query confirmed genuine supersedence (new Microsoft.VisualStudioCode
+app 43c02316-... shows supersededAppCount:1, old app 9c72869d-... shows
+supersedingAppCount:1) and assignment carry-over (new app's live Graph
+assignments match the original's). Goals 2-5 (Inventory edit UI, redeploy
+confirmation, rollback UI) are implemented and unit/route-tested but their
+final browser click-through verification requires a real authenticated
+session this automated pass could not fabricate (all new routes require a
+Graph-verified user JWT, unlike the cron route's service secret) — pending
+a manual pass by a signed-in user.
 Backlog ref: `backlog_intuneget_lab_pilot.md` item 6 (supersedes it — see Relationship
 to item 6 below), plus the live-test findings from 2026-09-12/13 during item 9b's
 end-to-end verification.
