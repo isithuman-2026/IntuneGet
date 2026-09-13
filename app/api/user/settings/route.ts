@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient, isSupabaseServerConfigured } from '@/lib/supabase';
 import { parseAccessToken } from '@/lib/auth-utils';
+import { isSqliteMode } from '@/lib/db';
+import { sqliteUserSettings } from '@/lib/db/sqlite';
 import { DEFAULT_USER_SETTINGS } from '@/types/user-settings';
 import type { UserSettings, UserSettingsUpdate } from '@/types/user-settings';
 
@@ -76,6 +78,14 @@ export async function GET(request: NextRequest) {
       );
     }
 
+    if (isSqliteMode()) {
+      const stored = await sqliteUserSettings.get(user.userId);
+      return NextResponse.json({
+        settings: { ...DEFAULT_USER_SETTINGS, ...(stored ?? {}) },
+        hasStoredSettings: stored !== null,
+      });
+    }
+
     if (!isSupabaseServerConfigured()) {
       return NextResponse.json({
         settings: DEFAULT_USER_SETTINGS,
@@ -138,13 +148,6 @@ export async function PATCH(request: NextRequest) {
       );
     }
 
-    if (!isSupabaseServerConfigured()) {
-      return NextResponse.json(
-        { error: 'Saving user settings requires hosted services' },
-        { status: 503 }
-      );
-    }
-
     const payload = (await request.json()) as Record<string, unknown>;
     const settingsUpdate = sanitizeSettings(payload);
 
@@ -152,6 +155,18 @@ export async function PATCH(request: NextRequest) {
       return NextResponse.json(
         { error: 'No valid settings provided' },
         { status: 400 }
+      );
+    }
+
+    if (isSqliteMode()) {
+      const updated = await sqliteUserSettings.upsert(user.userId, settingsUpdate);
+      return NextResponse.json({ settings: updated, hasStoredSettings: true });
+    }
+
+    if (!isSupabaseServerConfigured()) {
+      return NextResponse.json(
+        { error: 'Saving user settings requires hosted services' },
+        { status: 503 }
       );
     }
 
