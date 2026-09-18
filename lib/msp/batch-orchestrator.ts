@@ -523,17 +523,23 @@ async function advanceBatch(batchId: string): Promise<boolean> {
     .single();
 
   // Update batch to terminal state
-  await supabase
+  const { data: updatedRows } = await supabase
     .from('msp_batch_deployments')
     .update({
       status: finalStatus,
       completed_at: new Date().toISOString(),
     })
     .eq('id', batchId)
-    .eq('status', 'in_progress'); // Only if still in_progress (avoid overwriting cancelled)
+    .eq('status', 'in_progress') // Only if still in_progress (avoid overwriting cancelled)
+    .select('id');
+
+  // Only the caller that actually won the in_progress -> terminal transition
+  // fires the webhook/audit log. Prevents duplicate delivery when two
+  // onJobCompleted() calls race advanceBatch() for the same batch.
+  const wonTransition = (updatedRows?.length ?? 0) > 0;
 
   // Fire webhook and audit log
-  if (batch) {
+  if (batch && wonTransition) {
     const eventType = finalStatus === 'completed' ? 'batch.completed' : 'batch.completed';
     try {
       await queueWebhookDelivery(batch.organization_id, eventType, {
