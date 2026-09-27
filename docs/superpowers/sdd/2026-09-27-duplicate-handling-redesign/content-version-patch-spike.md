@@ -1,27 +1,30 @@
 # Content-Version PATCH Spike — Decision Record
 
-Date: 2026-09-27. Ran live against the lab tenant (Build Test Run,
-`1fccf8a3-90e4-41c5-abf9-d32ac91718ca`) using the IntuneGet app registration's
-own client-credentials Graph token (app-only, `DeviceManagementApps.ReadWrite.All`).
+Date: 2026-09-27. Ran live against the lab tenant using the IntuneGet app
+registration's own client-credentials Graph token (app-only,
+`DeviceManagementApps.ReadWrite.All`). Tenant ID and object IDs are redacted
+below — this repo's `origin` is public (`isithuman-2026/IntuneGet`) and none
+of these identifiers need to travel with it; they're recorded privately in
+Claude memory (`backlog_intuneget_lab_pilot.md`) instead.
 
 ## Target app
 
 Confirmed the real supersedence chain from the 9c ledger is still live and
 growing — exactly the clutter this whole redesign is about:
 
-| App ID | displayVersion | createdDateTime | supersededAppCount | supersedingAppCount |
+| App (anonymized) | displayVersion | createdDateTime | supersededAppCount | supersedingAppCount |
 |---|---|---|---|---|
-| `9c72869d-7f1f-443f-a9b6-ecfa8943f2c7` | 1.135.0 | 2026-08-30 | 0 | 3 |
-| `43c02316-ec51-4e17-96a8-1336c29b623d` | 1.137.0 | 2026-09-13 | 1 | 2 |
-| `d5e7b3bb-7a7f-4cba-82b3-66dd397faf57` | 1.139.0 | 2026-09-26 | 2 | 1 |
-| `c274ff92-7336-4185-8197-8dbee6733729` | 1.139.1 | 2026-09-27 | 3 | 0 (current) |
+| App A (oldest) | 1.135.0 | 2026-08-30 | 0 | 3 |
+| App B | 1.137.0 | 2026-09-13 | 1 | 2 |
+| App C | 1.139.0 | 2026-09-26 | 2 | 1 |
+| App D (current) | 1.139.1 | 2026-09-27 | 3 | 0 |
 
 Four separate "Microsoft Visual Studio Code" Intune app objects, all still
 `publishingState: published`. Also found 2x Foxit PDF Reader and 2x Claude
 objects in the same tenant-wide app list — the clutter is not hypothetical.
 
-Spiked against the current app, `c274ff92-7336-4185-8197-8dbee6733729`
-(`committedContentVersion: 1` at the start).
+Spiked against App D, the current app (`committedContentVersion: 1` at the
+start).
 
 ## Steps run and results
 
@@ -53,6 +56,22 @@ Spiked against the current app, `c274ff92-7336-4185-8197-8dbee6733729`
    `publishingState: published`, `displayVersion: 1.139.1` — completely
    unaffected. The failed spike left no visible damage on the live app.
 
+## Update — 2026-09-27, post-review
+
+The implementation (`lib/intune-api.ts` `replaceAppContentInPlace`) was
+initially shipped without the polling this spike itself found necessary
+(steps 3 and 6 above are both async — `azureStorageUri` and the commit
+result are never present on the request that triggers them). Whole-branch
+review caught this; fixed to poll on both, matching this spike's own
+recorded behavior and `packager/src/intune-uploader.ts`'s proven pattern.
+
+**Still open:** this spike, and the code, have never observed the
+activation PATCH (step 7) actually *succeed* — only its correct rejection
+of an intentionally-invalid commit. A live re-run with real encrypted
+content (reusing `packager/src/intune-uploader.ts`'s encryption pipeline
+against a real `.intunewin`) would close that gap. Recommended before this
+mechanism gets a real caller wired into the auto-update path.
+
 ## Decision
 
 **Content-version PATCH is real and reachable on an already-published,
@@ -83,7 +102,7 @@ spec non-goal (one-time manual cleanup, not automated).
 
 ## Leftover state
 
-Content version `2` on `c274ff92-7336-4185-8197-8dbee6733729` is left
+Content version `2` on App D (the current app) is left
 uncommitted (`isCommitted: false`) from this spike. It has no effect on the
 live, deployed app (`committedContentVersion` is still `1`) and Graph has no
 delete endpoint for an individual content version — it will simply sit

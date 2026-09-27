@@ -1,4 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
+import path from 'path';
+import os from 'os';
+import fs from 'fs';
 
 const {
   parseAccessTokenMock,
@@ -36,6 +39,10 @@ function createAwaitableUploadHistoryQuery(
   };
   query.eq = (...args: unknown[]) => {
     operations.push({ method: 'eq', args });
+    return query;
+  };
+  query.order = (...args: unknown[]) => {
+    operations.push({ method: 'order', args });
     return query;
   };
   query.then = (resolve: (value: { data: unknown; error: unknown }) => unknown) =>
@@ -261,5 +268,75 @@ describe('GET /api/intune/apps/deployed', () => {
     expect(response.status).toBe(200);
     expect(body.deployedWingetIds).toEqual([]);
     expect(body.count).toBe(0);
+  });
+});
+
+describe('GET /api/intune/apps/deployed — SQLite mode dedupe (tenant scope)', () => {
+  let tmpDbPath: string;
+
+  beforeEach(() => {
+    tmpDbPath = path.join(os.tmpdir(), `test-deployed-route-${Date.now()}.db`);
+    process.env.DATABASE_PATH = tmpDbPath;
+    process.env.DATABASE_MODE = 'sqlite';
+    vi.resetModules();
+    vi.doMock('@/lib/auth-utils', () => ({
+      parseAccessToken: async () => ({ userId: 'user-1', tenantId: 'tenant-1', userEmail: 'user@example.com' }),
+    }));
+    vi.doMock('@/lib/supabase', () => ({ getServerClientOrNull: () => null }));
+    vi.doMock('@/lib/msp/tenant-resolution', () => ({ resolveTargetTenantId: vi.fn() }));
+  });
+
+  afterEach(async () => {
+    const { closeSqliteDb } = await import('@/lib/db/sqlite');
+    closeSqliteDb();
+    const { resetDatabaseInstance } = await import('@/lib/db');
+    resetDatabaseInstance();
+    fs.rmSync(tmpDbPath, { force: true });
+    delete process.env.DATABASE_MODE;
+    vi.restoreAllMocks();
+  });
+
+  it('returns only the newest deployed app when the same winget id has multiple deployed jobs', async () => {
+    const { getDatabase } = await import('@/lib/db');
+    // Oldest job first — the superseded app that must NOT win.
+    // intune_app_id isn't an INSERT column on jobs.create (it's set once
+    // the real Intune App ID is known, via a later update) — match that
+    // here with an explicit update() rather than passing it to create().
+    const oldJob = await getDatabase().jobs.create({
+      user_id: 'user-1', tenant_id: 'tenant-1', winget_id: 'Microsoft.VisualStudioCode', version: '1.0.0',
+      display_name: 'Microsoft Visual Studio Code', publisher: 'Microsoft', architecture: 'x64',
+      installer_type: 'exe', installer_url: 'https://x/old.exe', install_command: 'x',
+      uninstall_command: 'x', install_scope: 'machine', status: 'deployed',
+    });
+    await getDatabase().jobs.update(oldJob.id, { intune_app_id: 'old-app-id' });
+
+    // A real delay, not a fake timer — created_at is a fresh
+    // Date().toISOString() per insert, and the dedupe relies on it
+    // actually differing between the two rows.
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    // Newest job — the one currently live, must win.
+    const newJob = await getDatabase().jobs.create({
+      user_id: 'user-1', tenant_id: 'tenant-1', winget_id: 'Microsoft.VisualStudioCode', version: '1.0.0',
+      display_name: 'Microsoft Visual Studio Code', publisher: 'Microsoft', architecture: 'x64',
+      installer_type: 'exe', installer_url: 'https://x/new.exe', install_command: 'x',
+      uninstall_command: 'x', install_scope: 'machine', status: 'deployed',
+    });
+    await getDatabase().jobs.update(newJob.id, { intune_app_id: 'new-app-id' });
+
+    const { GET } = await import('./route');
+    const response = await GET(
+      new NextRequest('http://localhost:3000/api/intune/apps/deployed?scope=tenant', {
+        headers: { Authorization: 'Bearer test-token' },
+      })
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    const vscodeEntries = body.tenantDeployments.filter(
+      (d: { wingetId: string }) => d.wingetId === 'Microsoft.VisualStudioCode'
+    );
+    expect(vscodeEntries).toHaveLength(1);
+    expect(vscodeEntries[0].intuneAppId).toBe('new-app-id');
   });
 });

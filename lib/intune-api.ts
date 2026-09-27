@@ -864,6 +864,41 @@ export interface ReplaceContentInput {
   encryptionInfo: ReplaceContentEncryptionInfo;
 }
 
+interface ContentFileState {
+  uploadState?: string;
+  azureStorageUri?: string;
+}
+
+/**
+ * Poll a mobileAppContentFile resource until `extract` returns a non-null
+ * result, or throw (extract itself throws on a terminal failure state).
+ * Both the Azure Storage URI and the commit result are only available
+ * asynchronously — never on the request that kicks them off.
+ */
+async function pollContentFile<T>(
+  fileUrl: string,
+  headers: Record<string, string>,
+  extract: (file: ContentFileState) => T | null
+): Promise<T> {
+  const maxAttempts = 60;
+  const delayMs = 2000;
+
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const response = await fetch(fileUrl, { headers: { Authorization: headers.Authorization } });
+    if (!response.ok) {
+      throw new Error(`Failed to poll content file state at ${fileUrl}: ${response.status}`);
+    }
+    const file = (await response.json()) as ContentFileState;
+    const result = extract(file);
+    if (result !== null) {
+      return result;
+    }
+    await new Promise((resolve) => setTimeout(resolve, delayMs));
+  }
+
+  throw new Error(`Timed out polling content file state at ${fileUrl}`);
+}
+
 /**
  * Replace a win32LobApp's content in place: create a new content version on
  * the EXISTING app, upload + commit the new (already-encrypted) package
@@ -912,12 +947,21 @@ export async function replaceAppContentInPlace(
   if (!fileResponse.ok) {
     throw new Error(`Failed to register content file on app ${appId}: ${fileResponse.status}`);
   }
-  const { id: contentFileId, azureStorageUri } = (await fileResponse.json()) as {
-    id: string;
-    azureStorageUri: string;
-  };
+  const { id: contentFileId } = (await fileResponse.json()) as { id: string };
 
-  // 3. Upload the encrypted bytes to the returned SAS URI.
+  const fileUrl = `${GRAPH_API_BASE}/deviceAppManagement/mobileApps/${appId}/microsoft.graph.win32LobApp/contentVersions/${contentVersionId}/files/${contentFileId}`;
+
+  // 3. Poll until Graph hands back a real Azure Storage SAS URI — it is
+  // never present on the POST response itself (confirmed live in the
+  // Task 4 spike: the file starts in azureStorageUriRequestPending).
+  const azureStorageUri = await pollContentFile<string>(fileUrl, headers, (file) => {
+    if (file.uploadState === 'azureStorageUriRequestFailed') {
+      throw new Error(`Azure Storage URI request failed for app ${appId}`);
+    }
+    return file.azureStorageUri ?? null;
+  });
+
+  // 4. Upload the encrypted bytes to that SAS URI.
   const uploadResponse = await fetch(azureStorageUri, {
     method: 'PUT',
     headers: { 'x-ms-blob-type': 'BlockBlob' },
@@ -927,20 +971,30 @@ export async function replaceAppContentInPlace(
     throw new Error(`Failed to upload content to Azure Storage for app ${appId}: ${uploadResponse.status}`);
   }
 
-  // 4. Commit the file with its encryption info.
-  const commitResponse = await fetch(
-    `${GRAPH_API_BASE}/deviceAppManagement/mobileApps/${appId}/microsoft.graph.win32LobApp/contentVersions/${contentVersionId}/files/${contentFileId}/commit`,
-    {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({ fileEncryptionInfo: content.encryptionInfo }),
-    }
-  );
+  // 5. Commit the file with its encryption info (accepted synchronously,
+  // but the actual commit result — success or failure — only shows up on
+  // a later GET, exactly like the SAS URI above).
+  const commitResponse = await fetch(`${fileUrl}/commit`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ fileEncryptionInfo: content.encryptionInfo }),
+  });
   if (!commitResponse.ok) {
     throw new Error(`Failed to commit content file for app ${appId}: ${commitResponse.status}`);
   }
 
-  // 5. Activate the new version.
+  // 6. Poll until the commit actually resolves. A failed commit (e.g. a
+  // digest mismatch) must never reach the activate step — Graph rejects
+  // that PATCH with "All AppFiles must be committed before committing an
+  // application", observed live in the Task 4 spike.
+  await pollContentFile<true>(fileUrl, headers, (file) => {
+    if (file.uploadState === 'commitFileFailed' || file.uploadState === 'commitFileTimedOut') {
+      throw new Error(`Content file commit failed for app ${appId} (state: ${file.uploadState})`);
+    }
+    return file.uploadState === 'commitFileSuccess' ? true : null;
+  });
+
+  // 7. Activate the new version.
   const patchResponse = await fetch(`${GRAPH_API_BASE}/deviceAppManagement/mobileApps/${appId}`, {
     method: 'PATCH',
     headers,

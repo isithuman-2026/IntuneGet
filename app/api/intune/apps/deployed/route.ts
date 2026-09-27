@@ -30,9 +30,18 @@ export async function GET(request: NextRequest) {
     if (!supabase) {
       const scope = new URL(request.url).searchParams.get('scope');
       if (scope === 'tenant') {
+        // getByTenantId returns most-recent-first; keep only the first
+        // (newest) deployed job per winget id so a superseded/duplicate app
+        // never wins over the one actually current in Intune.
         const jobs = await getDatabase().jobs.getByTenantId(user.tenantId);
+        const seenWingetIds = new Set<string>();
         const tenantDeployments = jobs
           .filter((job) => job.status === 'deployed')
+          .filter((job) => {
+            if (seenWingetIds.has(job.winget_id)) return false;
+            seenWingetIds.add(job.winget_id);
+            return true;
+          })
           .map((job) => ({
             wingetId: job.winget_id,
             deployedBy: job.user_email,
@@ -71,7 +80,8 @@ export async function GET(request: NextRequest) {
         .from('packaging_jobs')
         .select('winget_id, user_email, intune_app_id')
         .eq('tenant_id', tenantResolution.tenantId)
-        .eq('status', 'deployed');
+        .eq('status', 'deployed')
+        .order('completed_at', { ascending: false });
 
       if (error) {
         return NextResponse.json(

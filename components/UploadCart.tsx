@@ -111,6 +111,7 @@ export function UploadCart() {
     Map<string, { deployedBy: string | null; intuneAppId: string | null }>
   >(new Map());
   const [mergingAssignmentIds, setMergingAssignmentIds] = useState<Set<string>>(new Set());
+  const [mergeErrors, setMergeErrors] = useState<Map<string, string>>(new Map());
 
   const { isAuthenticated, getAccessToken, signIn, requestAdminConsent } = useMicrosoftAuth();
   const { isMspUser, selectedTenantId } = useMspOptional();
@@ -161,22 +162,28 @@ export function UploadCart() {
     };
   }, [isOpen, isAuthenticated, items.length, getAccessToken, isMspUser, selectedTenantId]);
 
-  // Add this cart item's target group to an already-deployed app's
-  // assignments instead of creating a duplicate Intune app object.
+  // Add this cart item's target group(s) to an already-deployed app's
+  // assignments instead of creating a duplicate Intune app object. Sends
+  // the item's full assignment list — never a single-assignment default —
+  // so an exclusion group or a second required group is never dropped, and
+  // never silently substitutes an all-devices install the user never chose.
   async function mergeAssignmentIntoExistingApp(item: CartItem) {
     const entry = tenantDeployedBy.get(item.wingetId);
     if (!entry?.intuneAppId || !isWin32CartItem(item)) return;
+    if (!item.assignments || item.assignments.length === 0) return;
     setMergingAssignmentIds((prev) => new Set(prev).add(item.id));
+    setMergeErrors((prev) => {
+      const next = new Map(prev);
+      next.delete(item.id);
+      return next;
+    });
     try {
       const accessToken = await getAccessToken();
       if (!accessToken) return;
       const response = await fetch(`/api/intune/apps/${entry.intuneAppId}/merge-assignment`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          accessToken,
-          assignment: item.assignments?.[0] ?? { type: 'allDevices', intent: 'required' },
-        }),
+        body: JSON.stringify({ assignments: item.assignments }),
       });
       if (!response.ok) {
         const { error: errorMessage } = await response.json().catch(() => ({ error: 'Unknown error' }));
@@ -184,8 +191,10 @@ export function UploadCart() {
       }
       removeItem(item.id);
     } catch (err) {
-      // Non-fatal: leave the cart item in place so the user can retry or
-      // fall back to "Deploy as new app anyway".
+      // Leave the cart item in place so the user can retry or fall back to
+      // "Deploy as separate app" — but tell them why, don't fail silently.
+      const message = err instanceof Error ? err.message : 'Failed to add this group to the existing app';
+      setMergeErrors((prev) => new Map(prev).set(item.id, message));
       console.error('Failed to merge assignment into existing app:', err);
     } finally {
       setMergingAssignmentIds((prev) => {
@@ -522,7 +531,16 @@ export function UploadCart() {
                               {tenantDeployedBy.get(item.wingetId)?.intuneAppId && (
                                 <button
                                   onClick={() => mergeAssignmentIntoExistingApp(item)}
-                                  disabled={isDeploying || mergingAssignmentIds.has(item.id)}
+                                  disabled={
+                                    isDeploying ||
+                                    mergingAssignmentIds.has(item.id) ||
+                                    !('assignments' in item && item.assignments && item.assignments.length > 0)
+                                  }
+                                  title={
+                                    'assignments' in item && item.assignments && item.assignments.length > 0
+                                      ? undefined
+                                      : 'Configure a target group for this app first'
+                                  }
                                   className="font-medium text-amber-800 underline underline-offset-2 transition-colors hover:text-amber-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-600 focus-visible:ring-offset-2 disabled:opacity-50 dark:text-amber-300 dark:hover:text-amber-200 dark:focus-visible:ring-amber-400 dark:focus-visible:ring-offset-bg-elevated"
                                 >
                                   {mergingAssignmentIds.has(item.id) ? 'Adding group…' : 'Add this group to existing app'}
@@ -536,6 +554,11 @@ export function UploadCart() {
                                 Deploy as separate app (different rules)
                               </button>
                             </div>
+                            {mergeErrors.has(item.id) && (
+                              <p className="mt-1.5 text-status-error dark:text-red-300">
+                                {mergeErrors.get(item.id)}
+                              </p>
+                            )}
                           </div>
                         </div>
                       )}
