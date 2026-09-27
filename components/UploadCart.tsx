@@ -516,7 +516,7 @@ export function UploadCart() {
                               {tenantDeployedBy.get(item.wingetId)?.deployedBy
                                 ? `Deployed by ${tenantDeployedBy.get(item.wingetId)?.deployedBy}.`
                                 : 'Already deployed by someone in this tenant.'}{' '}
-                              Deploying again is skipped unless you add this group to the existing app, or deploy as a new app.
+                              Deploying again is skipped unless the two versions actually need different detection rules, install behavior, or device requirements — then choose:
                             </p>
                             <div className="mt-1.5 flex flex-wrap gap-3">
                               {tenantDeployedBy.get(item.wingetId)?.intuneAppId && (
@@ -533,7 +533,7 @@ export function UploadCart() {
                                 disabled={isDeploying}
                                 className="font-medium text-amber-800 underline underline-offset-2 transition-colors hover:text-amber-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-600 focus-visible:ring-offset-2 disabled:opacity-50 dark:text-amber-300 dark:hover:text-amber-200 dark:focus-visible:ring-amber-400 dark:focus-visible:ring-offset-bg-elevated"
                               >
-                                Deploy as new app anyway
+                                Deploy as separate app (different rules)
                               </button>
                             </div>
                           </div>
