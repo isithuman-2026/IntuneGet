@@ -843,6 +843,117 @@ export async function applyAppRelationships(
   return warnings;
 }
 
+export interface ReplaceContentEncryptionInfo {
+  encryptionKey: string;
+  macKey: string;
+  initializationVector: string;
+  mac: string;
+  profileIdentifier: string;
+  fileDigest: string;
+  fileDigestAlgorithm: string;
+}
+
+export interface ReplaceContentInput {
+  fileName: string;
+  fileSize: number;
+  fileSizeEncrypted: number;
+  // BodyInit (not Buffer/Uint8Array): this project's DOM lib typing rejects
+  // typed arrays as a fetch body directly. Callers pass a Buffer — it
+  // satisfies BodyInit at the fetch call site under Node's fetch runtime.
+  uploadBuffer: BodyInit;
+  encryptionInfo: ReplaceContentEncryptionInfo;
+}
+
+/**
+ * Replace a win32LobApp's content in place: create a new content version on
+ * the EXISTING app, upload + commit the new (already-encrypted) package
+ * bytes, then activate it via committedContentVersion. No new Intune app
+ * object is created — same id, same assignments, before and after.
+ *
+ * Sequence and request shapes verified live against a real, already-
+ * published win32LobApp — see
+ * docs/superpowers/sdd/2026-09-27-duplicate-handling-redesign/content-version-patch-spike.md
+ */
+export async function replaceAppContentInPlace(
+  accessToken: string,
+  appId: string,
+  content: ReplaceContentInput
+): Promise<void> {
+  const headers = {
+    Authorization: `Bearer ${accessToken}`,
+    'Content-Type': 'application/json',
+  };
+
+  // 1. Create a new content version on the existing app.
+  const cvResponse = await fetch(
+    `${GRAPH_API_BASE}/deviceAppManagement/mobileApps/${appId}/microsoft.graph.win32LobApp/contentVersions`,
+    { method: 'POST', headers, body: JSON.stringify({}) }
+  );
+  if (!cvResponse.ok) {
+    throw new Error(`Failed to create content version for app ${appId}: ${cvResponse.status}`);
+  }
+  const { id: contentVersionId } = (await cvResponse.json()) as { id: string };
+
+  // 2. Register the content file on that version.
+  const fileResponse = await fetch(
+    `${GRAPH_API_BASE}/deviceAppManagement/mobileApps/${appId}/microsoft.graph.win32LobApp/contentVersions/${contentVersionId}/files`,
+    {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        '@odata.type': '#microsoft.graph.mobileAppContentFile',
+        name: content.fileName,
+        size: content.fileSize,
+        sizeEncrypted: content.fileSizeEncrypted,
+        isDependency: false,
+      }),
+    }
+  );
+  if (!fileResponse.ok) {
+    throw new Error(`Failed to register content file on app ${appId}: ${fileResponse.status}`);
+  }
+  const { id: contentFileId, azureStorageUri } = (await fileResponse.json()) as {
+    id: string;
+    azureStorageUri: string;
+  };
+
+  // 3. Upload the encrypted bytes to the returned SAS URI.
+  const uploadResponse = await fetch(azureStorageUri, {
+    method: 'PUT',
+    headers: { 'x-ms-blob-type': 'BlockBlob' },
+    body: content.uploadBuffer,
+  });
+  if (!uploadResponse.ok) {
+    throw new Error(`Failed to upload content to Azure Storage for app ${appId}: ${uploadResponse.status}`);
+  }
+
+  // 4. Commit the file with its encryption info.
+  const commitResponse = await fetch(
+    `${GRAPH_API_BASE}/deviceAppManagement/mobileApps/${appId}/microsoft.graph.win32LobApp/contentVersions/${contentVersionId}/files/${contentFileId}/commit`,
+    {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ fileEncryptionInfo: content.encryptionInfo }),
+    }
+  );
+  if (!commitResponse.ok) {
+    throw new Error(`Failed to commit content file for app ${appId}: ${commitResponse.status}`);
+  }
+
+  // 5. Activate the new version.
+  const patchResponse = await fetch(`${GRAPH_API_BASE}/deviceAppManagement/mobileApps/${appId}`, {
+    method: 'PATCH',
+    headers,
+    body: JSON.stringify({
+      '@odata.type': '#microsoft.graph.win32LobApp',
+      committedContentVersion: contentVersionId,
+    }),
+  });
+  if (!patchResponse.ok) {
+    throw new Error(`Failed to activate new content version for app ${appId}: ${patchResponse.status}`);
+  }
+}
+
 /**
  * Get Intune portal URL for an app
  */
