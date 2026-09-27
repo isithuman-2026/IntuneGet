@@ -27,12 +27,12 @@ describe('mergeAssignments', () => {
     expect(result[0].intent).toBe('available');
   });
 
-  it('treats allDevices/allUsers targets as their own singleton key, not group-keyed', () => {
+  it('treats allDevices/allLicensedUsers targets as their own singleton key, not group-keyed', () => {
     const existing: Win32LobAppAssignment[] = [
       { '@odata.type': '#microsoft.graph.mobileAppAssignment', intent: 'required', target: { '@odata.type': '#microsoft.graph.allDevicesAssignmentTarget' } },
     ];
     const incoming: Win32LobAppAssignment[] = [
-      { '@odata.type': '#microsoft.graph.mobileAppAssignment', intent: 'available', target: { '@odata.type': '#microsoft.graph.allUsersAssignmentTarget' } },
+      { '@odata.type': '#microsoft.graph.mobileAppAssignment', intent: 'available', target: { '@odata.type': '#microsoft.graph.allLicensedUsersAssignmentTarget' } },
     ];
     const result = mergeAssignments(existing, incoming);
     expect(result).toHaveLength(2);
