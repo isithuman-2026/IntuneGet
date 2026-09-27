@@ -11,6 +11,7 @@ interface UploadHistoryRow {
 interface TenantJobRow {
   winget_id: string;
   user_email: string | null;
+  intune_app_id: string | null;
 }
 
 export async function GET(request: NextRequest) {
@@ -29,10 +30,23 @@ export async function GET(request: NextRequest) {
     if (!supabase) {
       const scope = new URL(request.url).searchParams.get('scope');
       if (scope === 'tenant') {
+        // getByTenantId returns most-recent-first; keep only the first
+        // (newest) deployed job per winget id so a superseded/duplicate app
+        // never wins over the one actually current in Intune.
         const jobs = await getDatabase().jobs.getByTenantId(user.tenantId);
+        const seenWingetIds = new Set<string>();
         const tenantDeployments = jobs
           .filter((job) => job.status === 'deployed')
-          .map((job) => ({ wingetId: job.winget_id, deployedBy: job.user_email }));
+          .filter((job) => {
+            if (seenWingetIds.has(job.winget_id)) return false;
+            seenWingetIds.add(job.winget_id);
+            return true;
+          })
+          .map((job) => ({
+            wingetId: job.winget_id,
+            deployedBy: job.user_email,
+            intuneAppId: job.intune_app_id ?? null,
+          }));
         return NextResponse.json({
           tenantDeployments,
           deployedWingetIds: tenantDeployments.map((item) => item.wingetId),
@@ -64,9 +78,10 @@ export async function GET(request: NextRequest) {
     if (scope === 'tenant') {
       const { data, error } = await supabase
         .from('packaging_jobs')
-        .select('winget_id, user_email')
+        .select('winget_id, user_email, intune_app_id')
         .eq('tenant_id', tenantResolution.tenantId)
-        .eq('status', 'deployed');
+        .eq('status', 'deployed')
+        .order('completed_at', { ascending: false });
 
       if (error) {
         return NextResponse.json(
@@ -75,16 +90,17 @@ export async function GET(request: NextRequest) {
         );
       }
 
-      const byWingetId = new Map<string, string | null>();
+      const byWingetId = new Map<string, { deployedBy: string | null; intuneAppId: string | null }>();
       for (const row of (data || []) as TenantJobRow[]) {
         if (row.winget_id && !byWingetId.has(row.winget_id)) {
-          byWingetId.set(row.winget_id, row.user_email);
+          byWingetId.set(row.winget_id, { deployedBy: row.user_email, intuneAppId: row.intune_app_id ?? null });
         }
       }
 
-      const tenantDeployments = Array.from(byWingetId, ([wingetId, deployedBy]) => ({
+      const tenantDeployments = Array.from(byWingetId, ([wingetId, info]) => ({
         wingetId,
-        deployedBy,
+        deployedBy: info.deployedBy,
+        intuneAppId: info.intuneAppId,
       }));
 
       return NextResponse.json({

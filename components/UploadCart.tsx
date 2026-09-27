@@ -104,9 +104,14 @@ export function UploadCart() {
   const { data: qaStatusesData } = useQaStatuses(
     items.filter(isWin32CartItem).map((item) => item.wingetId)
   );
-  // winget id -> email of whoever already deployed it in this tenant, so we can
-  // warn before a teammate's app is deployed a second time.
-  const [tenantDeployedBy, setTenantDeployedBy] = useState<Map<string, string | null>>(new Map());
+  // winget id -> who deployed it in this tenant + its Intune app id, so we can
+  // warn before a teammate's app is deployed a second time and offer to merge
+  // this group's assignment into the existing app instead of duplicating it.
+  const [tenantDeployedBy, setTenantDeployedBy] = useState<
+    Map<string, { deployedBy: string | null; intuneAppId: string | null }>
+  >(new Map());
+  const [mergingAssignmentIds, setMergingAssignmentIds] = useState<Set<string>>(new Set());
+  const [mergeErrors, setMergeErrors] = useState<Map<string, string>>(new Map());
 
   const { isAuthenticated, getAccessToken, signIn, requestAdminConsent } = useMicrosoftAuth();
   const { isMspUser, selectedTenantId } = useMspOptional();
@@ -143,9 +148,9 @@ export function UploadCart() {
         });
         if (!response.ok || cancelled) return;
         const data = await response.json();
-        const map = new Map<string, string | null>();
-        for (const d of (data.tenantDeployments || []) as { wingetId: string; deployedBy: string | null }[]) {
-          map.set(d.wingetId, d.deployedBy);
+        const map = new Map<string, { deployedBy: string | null; intuneAppId: string | null }>();
+        for (const d of (data.tenantDeployments || []) as { wingetId: string; deployedBy: string | null; intuneAppId: string | null }[]) {
+          map.set(d.wingetId, { deployedBy: d.deployedBy, intuneAppId: d.intuneAppId });
         }
         if (!cancelled) setTenantDeployedBy(map);
       } catch {
@@ -156,6 +161,49 @@ export function UploadCart() {
       cancelled = true;
     };
   }, [isOpen, isAuthenticated, items.length, getAccessToken, isMspUser, selectedTenantId]);
+
+  // Add this cart item's target group(s) to an already-deployed app's
+  // assignments instead of creating a duplicate Intune app object. Sends
+  // the item's full assignment list — never a single-assignment default —
+  // so an exclusion group or a second required group is never dropped, and
+  // never silently substitutes an all-devices install the user never chose.
+  async function mergeAssignmentIntoExistingApp(item: CartItem) {
+    const entry = tenantDeployedBy.get(item.wingetId);
+    if (!entry?.intuneAppId || !isWin32CartItem(item)) return;
+    if (!item.assignments || item.assignments.length === 0) return;
+    setMergingAssignmentIds((prev) => new Set(prev).add(item.id));
+    setMergeErrors((prev) => {
+      const next = new Map(prev);
+      next.delete(item.id);
+      return next;
+    });
+    try {
+      const accessToken = await getAccessToken();
+      if (!accessToken) return;
+      const response = await fetch(`/api/intune/apps/${entry.intuneAppId}/merge-assignment`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ assignments: item.assignments }),
+      });
+      if (!response.ok) {
+        const { error: errorMessage } = await response.json().catch(() => ({ error: 'Unknown error' }));
+        throw new Error(errorMessage);
+      }
+      removeItem(item.id);
+    } catch (err) {
+      // Leave the cart item in place so the user can retry or fall back to
+      // "Deploy as separate app" — but tell them why, don't fail silently.
+      const message = err instanceof Error ? err.message : 'Failed to add this group to the existing app';
+      setMergeErrors((prev) => new Map(prev).set(item.id, message));
+      console.error('Failed to merge assignment into existing app:', err);
+    } finally {
+      setMergingAssignmentIds((prev) => {
+        const next = new Set(prev);
+        next.delete(item.id);
+        return next;
+      });
+    }
+  }
 
   // Escape key handler for sidebar. Radix dialogs prevent default on Escape
   // but the event still bubbles to document, so yield while a nested overlay
@@ -474,17 +522,43 @@ export function UploadCart() {
                           <div className="text-xs flex-1">
                             <p className="font-medium text-amber-900 dark:text-amber-300">Already deployed in this tenant</p>
                             <p className="mt-0.5 text-amber-800 dark:text-amber-200/80">
-                              {tenantDeployedBy.get(item.wingetId)
-                                ? `Deployed by ${tenantDeployedBy.get(item.wingetId)}. Deploying again is skipped unless you deploy as a new app.`
-                                : 'Deploying again is skipped unless you deploy as a new app.'}
+                              {tenantDeployedBy.get(item.wingetId)?.deployedBy
+                                ? `Deployed by ${tenantDeployedBy.get(item.wingetId)?.deployedBy}.`
+                                : 'Already deployed by someone in this tenant.'}{' '}
+                              Deploying again is skipped unless the two versions actually need different detection rules, install behavior, or device requirements — then choose:
                             </p>
-                            <button
-                              onClick={() => updateItem(item.id, { forceCreate: true })}
-                              disabled={isDeploying}
-                              className="mt-1.5 font-medium text-amber-800 underline underline-offset-2 transition-colors hover:text-amber-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-600 focus-visible:ring-offset-2 disabled:opacity-50 dark:text-amber-300 dark:hover:text-amber-200 dark:focus-visible:ring-amber-400 dark:focus-visible:ring-offset-bg-elevated"
-                            >
-                              Deploy as new app anyway
-                            </button>
+                            <div className="mt-1.5 flex flex-wrap gap-3">
+                              {tenantDeployedBy.get(item.wingetId)?.intuneAppId && (
+                                <button
+                                  onClick={() => mergeAssignmentIntoExistingApp(item)}
+                                  disabled={
+                                    isDeploying ||
+                                    mergingAssignmentIds.has(item.id) ||
+                                    !('assignments' in item && item.assignments && item.assignments.length > 0)
+                                  }
+                                  title={
+                                    'assignments' in item && item.assignments && item.assignments.length > 0
+                                      ? undefined
+                                      : 'Configure a target group for this app first'
+                                  }
+                                  className="font-medium text-amber-800 underline underline-offset-2 transition-colors hover:text-amber-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-600 focus-visible:ring-offset-2 disabled:opacity-50 dark:text-amber-300 dark:hover:text-amber-200 dark:focus-visible:ring-amber-400 dark:focus-visible:ring-offset-bg-elevated"
+                                >
+                                  {mergingAssignmentIds.has(item.id) ? 'Adding group…' : 'Add this group to existing app'}
+                                </button>
+                              )}
+                              <button
+                                onClick={() => updateItem(item.id, { forceCreate: true })}
+                                disabled={isDeploying}
+                                className="font-medium text-amber-800 underline underline-offset-2 transition-colors hover:text-amber-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-600 focus-visible:ring-offset-2 disabled:opacity-50 dark:text-amber-300 dark:hover:text-amber-200 dark:focus-visible:ring-amber-400 dark:focus-visible:ring-offset-bg-elevated"
+                              >
+                                Deploy as separate app (different rules)
+                              </button>
+                            </div>
+                            {mergeErrors.has(item.id) && (
+                              <p className="mt-1.5 text-status-error dark:text-red-300">
+                                {mergeErrors.get(item.id)}
+                              </p>
+                            )}
                           </div>
                         </div>
                       )}
