@@ -186,6 +186,50 @@ describe('GET /api/intune/apps/deployed', () => {
     expect(body.error).toBe('Not authorized to access other tenants');
   });
 
+  it('includes intuneAppId in tenant-scope deployments (Supabase)', async () => {
+    parseAccessTokenMock.mockResolvedValue({
+      userId: 'user-1',
+      userEmail: 'user@example.com',
+      tenantId: 'tenant-home',
+      userName: 'User',
+    });
+
+    const packagingJobsQuery = createAwaitableUploadHistoryQuery(
+      {
+        data: [
+          { winget_id: 'Microsoft.Edge', user_email: 'teammate@example.com', intune_app_id: 'app-guid-1' },
+        ],
+        error: null,
+      },
+      []
+    );
+
+    getServerClientOrNullMock.mockReturnValue({
+      from: (table: string) => {
+        if (table === 'packaging_jobs') return packagingJobsQuery;
+        throw new Error(`Unexpected table: ${table}`);
+      },
+    });
+
+    resolveTargetTenantIdMock.mockResolvedValue({
+      tenantId: 'tenant-home',
+      errorResponse: null,
+    });
+
+    const request = new NextRequest('http://localhost:3000/api/intune/apps/deployed?scope=tenant');
+    request.headers.set('Authorization', 'Bearer test-token');
+
+    const response = await GET(request);
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.tenantDeployments[0]).toEqual({
+      wingetId: 'Microsoft.Edge',
+      deployedBy: 'teammate@example.com',
+      intuneAppId: 'app-guid-1',
+    });
+  });
+
   it('handles empty deployment history', async () => {
     parseAccessTokenMock.mockResolvedValue({
       userId: 'user-1',
