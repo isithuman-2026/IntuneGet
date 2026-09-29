@@ -843,6 +843,80 @@ export async function applyAppRelationships(
   return warnings;
 }
 
+/**
+ * Install summary counts for an app (device check-in status). Used to gate
+ * auto-prune: an old superseded app is only safe to delete once no device
+ * still has it installed or pending install.
+ */
+export interface AppInstallSummary {
+  installedDeviceCount: number;
+  pendingInstallDeviceCount: number;
+}
+
+export async function getAppInstallSummary(
+  accessToken: string,
+  appId: string
+): Promise<AppInstallSummary> {
+  const response = await fetch(
+    `${GRAPH_API_BASE}/deviceAppManagement/mobileApps/${appId}/installSummary`,
+    { headers: { Authorization: `Bearer ${accessToken}` } }
+  );
+
+  if (response.status === 404) {
+    // App already gone - nothing left to migrate off of.
+    return { installedDeviceCount: 0, pendingInstallDeviceCount: 0 };
+  }
+  if (!response.ok) {
+    throw new Error(`Failed to get install summary for app ${appId}: ${response.statusText}`);
+  }
+
+  const data = (await response.json()) as Partial<AppInstallSummary>;
+  return {
+    installedDeviceCount: data.installedDeviceCount ?? 0,
+    pendingInstallDeviceCount: data.pendingInstallDeviceCount ?? 0,
+  };
+}
+
+/**
+ * Clear all relationships (dependency/supersedence) on an app. Graph's
+ * updateRelationships REPLACES the whole list, so an empty array removes
+ * every relationship. Required before deleteApp() will succeed on an app
+ * still referenced by a supersedence relationship - confirmed via live
+ * manual test (see auto-prune design spec).
+ * Non-fatal: returns a warning string on failure instead of throwing,
+ * mirroring applyAppRelationships().
+ */
+export async function clearAppRelationships(
+  accessToken: string,
+  appId: string
+): Promise<string | null> {
+  try {
+    const response = await fetch(
+      `${GRAPH_API_BASE}/deviceAppManagement/mobileApps/${appId}/updateRelationships`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ relationships: [] }),
+      }
+    );
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}));
+      const msg = `Failed to clear relationships on app ${appId}: ${(error as Record<string, Record<string, string>>).error?.message || response.statusText}`;
+      console.error('[intune-api] clearAppRelationships error:', msg);
+      return msg;
+    }
+    return null;
+  } catch (err) {
+    const msg = `Failed to clear relationships on app ${appId}: ${err instanceof Error ? err.message : 'Unknown error'}`;
+    console.error('[intune-api] clearAppRelationships error:', msg);
+    return msg;
+  }
+}
+
 export interface ReplaceContentEncryptionInfo {
   encryptionKey: string;
   macKey: string;

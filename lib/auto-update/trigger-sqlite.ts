@@ -10,6 +10,7 @@ import {
   sqliteUpdatePolicies,
   sqliteAutoUpdateHistory,
   sqliteUserSettings,
+  sqlitePendingAppPrune,
   type UpdateCheckInsert,
 } from '@/lib/db/sqlite';
 import { getDatabase } from '@/lib/db';
@@ -149,6 +150,17 @@ export class AutoUpdateTriggerSqlite {
 
       jobId = job.id;
       await sqliteAutoUpdateHistory.updateStatus(historyId, 'packaging', { packagingJobId: job.id });
+
+      // Record a prune candidate for the old app now that a supersedence
+      // attempt is committed. new_app_id is unknown until the packaging
+      // workflow finishes; the prune job resolves it lazily via job_id.
+      if (autoSupersede && updateInfo.currentIntuneAppId) {
+        await sqlitePendingAppPrune.create({
+          oldAppId: updateInfo.currentIntuneAppId,
+          jobId: job.id,
+          tenantId: policy.tenant_id,
+        });
+      }
 
       const { isGitHubActionsConfigured, triggerPackagingWorkflow } = await import('@/lib/github-actions');
       if (isGitHubActionsConfigured()) {
