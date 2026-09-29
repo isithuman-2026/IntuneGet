@@ -13,6 +13,7 @@ import {
   ToggleRight,
   ShieldBan,
   SlidersHorizontal,
+  Info,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useMicrosoftAuth } from '@/hooks/useMicrosoftAuth';
@@ -503,8 +504,12 @@ export function AssignmentConfig({ assignments, onChange }: AssignmentConfigProp
           {/* Assignment List */}
           {assignments.length > 0 && (
             <div>
-              <label className="block text-sm font-medium text-text-secondary mb-2">
+              <label className="flex items-center gap-1.5 text-sm font-medium text-text-secondary mb-2">
                 Configured Assignments ({assignments.length})
+                <Info
+                  className="w-3.5 h-3.5 text-text-muted cursor-help"
+                  title="Required vs Available: Required assignments are enforced and self-healing, but Company Portal only shows Reinstall for them (no Uninstall button) — this is an Intune platform rule, not a bug. To let users uninstall an app themselves from Company Portal, assign it to a user group (or All Users) with intent Available. Available intent is not allowed on device-targeted groups (including All Devices) — Intune only permits it for user targets."
+                />
               </label>
               <div className="space-y-2">
                 {assignments.map((assignment, index) => {
