@@ -285,6 +285,46 @@ function initializeSchema(db: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_auto_update_history_policy ON auto_update_history(policy_id);
   `);
 
+  // Create pending_app_prune table - tracks old apps superseded by
+  // auto-update that are candidates for deletion once devices migrate off
+  // them. new_app_id starts NULL: it isn't known until the async packaging
+  // workflow for the new app finishes (resolved lazily via job_id at
+  // prune-check time, see lib/auto-update/prune.ts).
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS pending_app_prune (
+      id TEXT PRIMARY KEY,
+      old_app_id TEXT NOT NULL,
+      new_app_id TEXT,
+      job_id TEXT NOT NULL,
+      tenant_id TEXT NOT NULL,
+      superseded_at TEXT NOT NULL DEFAULT (datetime('now')),
+      status TEXT NOT NULL DEFAULT 'pending',
+      last_checked_at TEXT,
+      last_error TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `);
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_pending_app_prune_status ON pending_app_prune(status);
+  `);
+
+  // Append-only audit trail: one row per prune-cycle attempt outcome.
+  // This is destructive to real tenant Intune objects, so every attempt
+  // (not just the row's current state) is durably logged.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS pending_app_prune_log (
+      id TEXT PRIMARY KEY,
+      pending_prune_id TEXT NOT NULL,
+      action TEXT NOT NULL,
+      detail TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (pending_prune_id) REFERENCES pending_app_prune(id)
+    )
+  `);
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_pending_app_prune_log_prune_id ON pending_app_prune_log(pending_prune_id);
+  `);
+
   // Create notification_preferences table
   db.exec(`
     CREATE TABLE IF NOT EXISTS notification_preferences (
@@ -1471,6 +1511,76 @@ export const sqliteUploadHistory = {
       .prepare('SELECT * FROM upload_history WHERE intune_tenant_id = ? AND intune_app_id = ? ORDER BY deployed_at DESC LIMIT 1')
       .get(tenantId, intuneAppId) as UploadHistoryRecord | undefined;
     return row ?? null;
+  },
+};
+
+export interface PendingAppPrune {
+  id: string;
+  old_app_id: string;
+  new_app_id: string | null;
+  job_id: string;
+  tenant_id: string;
+  superseded_at: string;
+  status: 'pending' | 'deleted';
+  last_checked_at: string | null;
+  last_error: string | null;
+  created_at: string;
+}
+
+/**
+ * Tracks old apps superseded by auto-update, pending deletion once devices
+ * migrate off them (lib/auto-update/prune.ts). SQLite-only - no Supabase
+ * equivalent exists (see spec's Supabase-parity note).
+ */
+export const sqlitePendingAppPrune = {
+  async create(params: { oldAppId: string; jobId: string; tenantId: string }): Promise<{ id: string }> {
+    const database = getDb();
+    const id = crypto.randomUUID();
+    database
+      .prepare(`
+        INSERT INTO pending_app_prune (id, old_app_id, job_id, tenant_id, status, superseded_at)
+        VALUES (?, ?, ?, ?, 'pending', ?)
+      `)
+      .run(id, params.oldAppId, params.jobId, params.tenantId, new Date().toISOString());
+    return { id };
+  },
+
+  /** Rows still pending, superseded at or before the given cutoff timestamp. */
+  async listDue(cutoffIso: string): Promise<PendingAppPrune[]> {
+    const database = getDb();
+    return database
+      .prepare(`SELECT * FROM pending_app_prune WHERE status = 'pending' AND superseded_at <= ?`)
+      .all(cutoffIso) as PendingAppPrune[];
+  },
+
+  async setNewAppId(id: string, newAppId: string): Promise<void> {
+    const database = getDb();
+    database.prepare('UPDATE pending_app_prune SET new_app_id = ? WHERE id = ?').run(newAppId, id);
+  },
+
+  async markDeleted(id: string): Promise<void> {
+    const database = getDb();
+    database
+      .prepare(`UPDATE pending_app_prune SET status = 'deleted', last_checked_at = ?, last_error = NULL WHERE id = ?`)
+      .run(new Date().toISOString(), id);
+  },
+
+  /** Row stays 'pending' - used for both "not ready yet" and retryable errors. */
+  async touchChecked(id: string, error?: string): Promise<void> {
+    const database = getDb();
+    database
+      .prepare('UPDATE pending_app_prune SET last_checked_at = ?, last_error = ? WHERE id = ?')
+      .run(new Date().toISOString(), error ?? null, id);
+  },
+
+  async logAttempt(pendingPruneId: string, action: 'skipped' | 'deleted' | 'error', detail?: string): Promise<void> {
+    const database = getDb();
+    database
+      .prepare(`
+        INSERT INTO pending_app_prune_log (id, pending_prune_id, action, detail)
+        VALUES (?, ?, ?, ?)
+      `)
+      .run(crypto.randomUUID(), pendingPruneId, action, detail ?? null);
   },
 };
 
