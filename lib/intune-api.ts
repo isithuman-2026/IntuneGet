@@ -853,13 +853,40 @@ export interface AppInstallSummary {
   pendingInstallDeviceCount: number;
 }
 
+// resultantAppState enum values (microsoft.graph.resultantAppState)
+const INSTALL_STATE_INSTALLED = 1;
+const INSTALL_STATE_PENDING_INSTALL = 5;
+
 export async function getAppInstallSummary(
   accessToken: string,
   appId: string
 ): Promise<AppInstallSummary> {
+  // The documented installSummary navigation property
+  // (deviceAppManagement/mobileApps/{id}/installSummary) has been removed
+  // from the live Graph schema even though learn.microsoft.com still lists
+  // it - confirmed live 2026-09-29 ("Resource not found for the segment
+  // 'installSummary'"). Use the Reports API instead; ApplicationId is the
+  // only reliably filterable column on this report (InstallState filtering
+  // 400s with a type-mismatch error server-side), so counts are computed
+  // client-side from the returned rows.
   const response = await fetch(
-    `${GRAPH_API_BASE}/deviceAppManagement/mobileApps/${appId}/installSummary`,
-    { headers: { Authorization: `Bearer ${accessToken}` } }
+    `${GRAPH_API_BASE}/deviceManagement/reports/retrieveDeviceAppInstallationStatusReport`,
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        name: 'DeviceInstallStatusByApp',
+        filter: `(ApplicationId eq '${appId}')`,
+        select: ['InstallState'],
+        skip: 0,
+        // ponytail: no pagination beyond this - fine for realistic per-app
+        // device counts; add a skip-loop if a tenant ever exceeds it.
+        top: 999,
+      }),
+    }
   );
 
   if (response.status === 404) {
@@ -867,14 +894,24 @@ export async function getAppInstallSummary(
     return { installedDeviceCount: 0, pendingInstallDeviceCount: 0 };
   }
   if (!response.ok) {
-    throw new Error(`Failed to get install summary for app ${appId}: ${response.statusText}`);
+    throw new Error(`Failed to get install status report for app ${appId}: ${response.statusText}`);
   }
 
-  const data = (await response.json()) as Partial<AppInstallSummary>;
-  return {
-    installedDeviceCount: data.installedDeviceCount ?? 0,
-    pendingInstallDeviceCount: data.pendingInstallDeviceCount ?? 0,
-  };
+  const data = (await response.json()) as { Schema?: { Column: string }[]; Values?: unknown[][] };
+  const stateIndex = data.Schema?.findIndex((c) => c.Column === 'InstallState') ?? -1;
+  const rows = data.Values ?? [];
+
+  let installedDeviceCount = 0;
+  let pendingInstallDeviceCount = 0;
+  if (stateIndex >= 0) {
+    for (const row of rows) {
+      const state = Number(row[stateIndex]);
+      if (state === INSTALL_STATE_INSTALLED) installedDeviceCount++;
+      else if (state === INSTALL_STATE_PENDING_INSTALL) pendingInstallDeviceCount++;
+    }
+  }
+
+  return { installedDeviceCount, pendingInstallDeviceCount };
 }
 
 /**
