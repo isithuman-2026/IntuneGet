@@ -103,7 +103,8 @@ export default function EnvironmentReferencePage() {
               <TableCell className="font-medium text-text-primary"><T>SQLite DB</T></TableCell>
               <TableCell>
                 <T><code>PACKAGER_API_KEY</code> (with local packager), optional{" "}
-                <code>DATABASE_PATH</code></T>
+                <code>DATABASE_PATH</code>, optional{" "}
+                <code>AUTO_PRUNE_OLD_APPS</code> / <code>AUTO_PRUNE_GRACE_DAYS</code></T>
               </TableCell>
             </TableRow>
             <TableRow>
@@ -164,6 +165,21 @@ export default function EnvironmentReferencePage() {
             <T>Confirm database mode first, then packager mode. Most setup issues
             come from mixing sqlite/supabase variables or missing packager auth
             key alignment.</T>
+          </p>
+        </Callout>
+      </section>
+
+      <section>
+        <Callout type="warning" title="AUTO_PRUNE_OLD_APPS deletes real Intune apps">
+          <p>
+            <T>SQLite mode only. When <code>AUTO_PRUNE_OLD_APPS=true</code>, a
+            background job deletes an old superseded app once zero devices
+            report it installed or pending, and <code>AUTO_PRUNE_GRACE_DAYS</code>{" "}
+            (default 14) has elapsed since supersedence was set. It never
+            targets the current/latest version of an app -- only an app that
+            a newer version has genuinely superseded. Defaults to off; this is
+            a permanent, unsupervised deletion of real Intune app objects once
+            enabled.</T>
           </p>
         </Callout>
       </section>

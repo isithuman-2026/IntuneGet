@@ -184,6 +184,46 @@ export default function UpdatesPoliciesPage() {
             generated and the app-level caveat when mixing intents.</T>
           </p>
         </Callout>
+
+        <Callout type="warning" title="Required apps cannot be uninstalled from Company Portal">
+          <p>
+            <T>This is an Intune platform rule, not an IntuneGet limitation:
+            Company Portal only shows an Uninstall button for apps assigned
+            with <code>Available</code> intent. <code>Required</code> apps
+            are enforced/self-healing and only offer Reinstall. Graph also
+            only permits <code>Available</code> intent on user-targeted
+            groups (or All Users) -- never on device-targeted groups,
+            including All Devices. To let end users self-service uninstall
+            an app, target a user group with <code>Available</code> intent.</T>
+          </p>
+        </Callout>
+      </section>
+
+      <section>
+        <h2 className="text-2xl font-semibold text-text-primary mb-4">
+          <T>Supersedence &amp; Old-App Cleanup</T>
+        </h2>
+        <p className="text-text-secondary mb-4">
+          <T>When an <code>auto_update</code> policy deploys a new version,
+          IntuneGet sets a real Graph supersedence relationship between the
+          new app and the old one it replaces, so Intune migrates devices
+          off the old version automatically.</T>
+        </p>
+        <p className="text-text-secondary mb-4">
+          <T>Optionally (SQLite mode, <code>AUTO_PRUNE_OLD_APPS=true</code>),
+          a background job then deletes the old app once zero devices still
+          report it installed or pending, and a grace period has elapsed.
+          See the{" "}
+          <Link
+            href="/docs/environment-reference"
+            className="text-accent-cyan hover:underline"
+          >
+            Environment Reference
+          </Link>{" "}
+          for the full variable details. This never touches the
+          current/latest version of an app -- only a version a newer one has
+          genuinely superseded.</T>
+        </p>
       </section>
     </div>
   );
