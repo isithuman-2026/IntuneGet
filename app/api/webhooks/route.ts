@@ -133,6 +133,15 @@ export async function POST(request: NextRequest) {
         );
       }
 
+      // Same URL twice means every notification is delivered twice
+      const existing = await sqliteWebhooks.listByUser(user.userId);
+      if (existing.some((w) => w.url === body.url)) {
+        return NextResponse.json(
+          { error: 'A webhook with this URL already exists' },
+          { status: 409 }
+        );
+      }
+
       const webhook = await sqliteWebhooks.create(user.userId, {
         name: body.name,
         url: body.url,

@@ -1,3 +1,5 @@
+import type { PackageAssignment } from "./upload";
+
 export type ThemeMode = "light" | "dark";
 export type ViewMode = "grid" | "list";
 
@@ -11,6 +13,8 @@ export interface UserSettings {
   onboardingCompleted: boolean;
   carryOverAssignments: boolean;
   supersedePreviousApp: boolean;
+  // Assignments prefilled on every new cart item that has none of its own
+  defaultAssignments: PackageAssignment[];
 }
 
 export type UserSettingsUpdate = Partial<UserSettings>;
@@ -25,6 +29,7 @@ export const DEFAULT_USER_SETTINGS: UserSettings = {
   onboardingCompleted: false,
   carryOverAssignments: false,
   supersedePreviousApp: false,
+  defaultAssignments: [],
 };
 
 export interface UserSettingsResponse {

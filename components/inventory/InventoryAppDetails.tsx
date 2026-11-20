@@ -202,6 +202,15 @@ export function InventoryAppDetails({ appId, onClose, onUpdate }: InventoryAppDe
               {editApp.isError && (
                 <p className="text-sm text-status-error mt-2">{editApp.error.message}</p>
               )}
+              <label className="flex items-center gap-2 mt-4 text-sm text-text-primary">
+                <input
+                  type="checkbox"
+                  checked={app.allowAvailableUninstall ?? false}
+                  disabled={editApp.isPending}
+                  onChange={(e) => editApp.mutate({ allowAvailableUninstall: e.target.checked })}
+                />
+                Allow users to uninstall from Company Portal (available assignments only)
+              </label>
             </div>
           )}
 

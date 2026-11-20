@@ -65,4 +65,34 @@ describe('GET/PATCH /api/user/settings (SQLite mode)', () => {
     expect(getBody.settings.supersedePreviousApp).toBe(true);
     expect(getBody.hasStoredSettings).toBe(true);
   });
+
+  it('PATCH stores valid default assignments and drops malformed ones', async () => {
+    const { PATCH } = await import('./route');
+    const response = await PATCH(new NextRequest('http://x/api/user/settings', {
+      method: 'PATCH',
+      headers: { Authorization: 'Bearer x', 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        defaultAssignments: [
+          { type: 'allUsers', intent: 'available', notifications: 'showReboot' },
+          { type: 'group', intent: 'required', groupId: 'g1', groupName: 'Pilot' },
+          { type: 'group', intent: 'required' },
+          { type: 'allDevices', intent: 'bogus' },
+          'junk',
+        ],
+      }),
+    }));
+    const body = await response.json();
+    expect(body.settings.defaultAssignments).toEqual([
+      { type: 'allUsers', intent: 'available', notifications: 'showReboot' },
+      { type: 'group', intent: 'required', groupId: 'g1', groupName: 'Pilot' },
+    ]);
+  });
+
+  it('GET defaults defaultAssignments to an empty list', async () => {
+    const { GET } = await import('./route');
+    const response = await GET(new NextRequest('http://x/api/user/settings', {
+      headers: { Authorization: 'Bearer x' },
+    }));
+    expect((await response.json()).settings.defaultAssignments).toEqual([]);
+  });
 });

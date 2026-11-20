@@ -27,6 +27,7 @@ export interface IntuneWin32App {
   owner: string | null;
   developer: string | null;
   notes: string | null;
+  allowAvailableUninstall?: boolean;
   largeIcon: {
     type: string;
     value: string;

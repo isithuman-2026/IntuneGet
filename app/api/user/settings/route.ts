@@ -5,6 +5,39 @@ import { isSqliteMode } from '@/lib/db';
 import { sqliteUserSettings } from '@/lib/db/sqlite';
 import { DEFAULT_USER_SETTINGS } from '@/types/user-settings';
 import type { UserSettings, UserSettingsUpdate } from '@/types/user-settings';
+import type { PackageAssignment } from '@/types/upload';
+
+const ASSIGNMENT_TYPES = ['allUsers', 'allDevices', 'group', 'exclusionGroup'];
+const ASSIGNMENT_INTENTS = ['required', 'available', 'uninstall', 'updateOnly'];
+
+// Keep only well-formed assignments, copying known fields so stored
+// settings never carry arbitrary client data.
+function sanitizeAssignments(value: unknown[]): PackageAssignment[] {
+  const result: PackageAssignment[] = [];
+  for (const raw of value) {
+    if (!isStoredSettings(raw)) continue;
+    const { type, intent, groupId } = raw;
+    if (typeof type !== 'string' || !ASSIGNMENT_TYPES.includes(type)) continue;
+    if (typeof intent !== 'string' || !ASSIGNMENT_INTENTS.includes(intent)) continue;
+    const needsGroup = type === 'group' || type === 'exclusionGroup';
+    if (needsGroup && (typeof groupId !== 'string' || !groupId)) continue;
+
+    const a = { type, intent } as PackageAssignment;
+    if (needsGroup) a.groupId = groupId as string;
+    if (typeof raw.groupName === 'string') a.groupName = raw.groupName;
+    if (typeof raw.filterId === 'string') a.filterId = raw.filterId;
+    if (typeof raw.filterName === 'string') a.filterName = raw.filterName;
+    if (raw.filterType === 'include' || raw.filterType === 'exclude') a.filterType = raw.filterType;
+    if (raw.notifications === 'showAll' || raw.notifications === 'showReboot' || raw.notifications === 'hideAll') {
+      a.notifications = raw.notifications;
+    }
+    if (raw.deliveryOptimizationPriority === 'notConfigured' || raw.deliveryOptimizationPriority === 'foreground') {
+      a.deliveryOptimizationPriority = raw.deliveryOptimizationPriority;
+    }
+    result.push(a);
+  }
+  return result;
+}
 
 function isBoolean(value: unknown): value is boolean {
   return typeof value === 'boolean';
@@ -63,6 +96,10 @@ function sanitizeSettings(payload: Record<string, unknown>): UserSettingsUpdate 
 
   if (isBoolean(payload.supersedePreviousApp)) {
     updates.supersedePreviousApp = payload.supersedePreviousApp;
+  }
+
+  if (Array.isArray(payload.defaultAssignments)) {
+    updates.defaultAssignments = sanitizeAssignments(payload.defaultAssignments);
   }
 
   return updates;

@@ -11,6 +11,7 @@ import {
 } from "react";
 import { useMicrosoftAuth } from "@/hooks/useMicrosoftAuth";
 import { useCartStore } from "@/stores/cart-store";
+import type { PackageAssignment } from "@/types/upload";
 import { useSidebarStore } from "@/stores/sidebar-store";
 import { getUserSettings, patchUserSettings } from "@/lib/user-settings";
 import {
@@ -36,6 +37,7 @@ type UserSettingsContextValue = {
   setOnboardingCompleted: (completed: boolean) => Promise<void>;
   setCarryOverAssignments: (enabled: boolean) => Promise<void>;
   setSupersedePreviousApp: (enabled: boolean) => Promise<void>;
+  setDefaultAssignments: (assignments: PackageAssignment[]) => Promise<void>;
 };
 
 const UserSettingsContext = createContext<UserSettingsContextValue | null>(null);
@@ -285,6 +287,10 @@ export function UserSettingsProvider({ children }: { children: ReactNode }) {
     }
   }, [settings.sidebarCollapsed, settings.cartAutoOpenOnAdd]);
 
+  useEffect(() => {
+    useCartStore.getState().setDefaultAssignments(settings.defaultAssignments ?? []);
+  }, [settings.defaultAssignments]);
+
   const applySettings = useCallback((update: UserSettingsUpdate) => {
     setSettingsState((current) => ({ ...current, ...update }));
     persistLocally(update);
@@ -453,6 +459,13 @@ export function UserSettingsProvider({ children }: { children: ReactNode }) {
     [updateSettings]
   );
 
+  const setDefaultAssignments = useCallback(
+    async (defaultAssignments: PackageAssignment[]) => {
+      await updateSettings({ defaultAssignments });
+    },
+    [updateSettings]
+  );
+
   const value = useMemo<UserSettingsContextValue>(
     () => ({
       settings,
@@ -469,6 +482,7 @@ export function UserSettingsProvider({ children }: { children: ReactNode }) {
       setOnboardingCompleted,
       setCarryOverAssignments,
       setSupersedePreviousApp,
+      setDefaultAssignments,
     }),
     [
       hasStoredSettings,
@@ -484,6 +498,7 @@ export function UserSettingsProvider({ children }: { children: ReactNode }) {
       setOnboardingCompleted,
       setCarryOverAssignments,
       setSupersedePreviousApp,
+      setDefaultAssignments,
       syncError,
     ]
   );

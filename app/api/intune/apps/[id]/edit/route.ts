@@ -3,7 +3,7 @@ import { parseAccessToken } from '@/lib/auth-utils';
 import { isSqliteMode, getDatabase } from '@/lib/db';
 import { sqliteUploadHistory, sqliteUpdatePolicies } from '@/lib/db/sqlite';
 import { getServicePrincipalToken } from '@/lib/intune/graph-client';
-import { assignToGroups, syncAppCategories } from '@/lib/intune-api';
+import { assignToGroups, syncAppCategories, setAllowAvailableUninstall } from '@/lib/intune-api';
 import { buildDeploymentConfigForApp } from '@/lib/update-policies/build-deployment-config';
 import { AutoUpdateTriggerSqlite } from '@/lib/auto-update/trigger-sqlite';
 import { getCatalogSource } from '@/lib/catalog';
@@ -13,6 +13,7 @@ import type { UpdatePolicyType } from '@/types/update-policies';
 interface EditAppRequest {
   assignments?: Win32LobAppAssignment[];
   categories?: { id: string }[];
+  allowAvailableUninstall?: boolean;
   policyType?: UpdatePolicyType;
   delayDays?: number;
   installCommand?: string;
@@ -45,7 +46,8 @@ export async function PATCH(
   const body = (await request.json()) as EditAppRequest;
   const results: Record<string, FieldResult> = {};
 
-  if (body.assignments || body.categories) {
+  const hasUninstallToggle = typeof body.allowAvailableUninstall === 'boolean';
+  if (body.assignments || body.categories || hasUninstallToggle) {
     const graphToken = await getServicePrincipalToken(user.tenantId);
     if (!graphToken) {
       return NextResponse.json({ error: 'Tenant consent is no longer active' }, { status: 403 });
@@ -66,6 +68,15 @@ export async function PATCH(
         results.categories = 'ok';
       } catch (error) {
         results.categories = { error: error instanceof Error ? error.message : 'Unknown error' };
+      }
+    }
+
+    if (hasUninstallToggle) {
+      try {
+        await setAllowAvailableUninstall(graphToken, intuneAppId, body.allowAvailableUninstall as boolean);
+        results.allowAvailableUninstall = 'ok';
+      } catch (error) {
+        results.allowAvailableUninstall = { error: error instanceof Error ? error.message : 'Unknown error' };
       }
     }
   }

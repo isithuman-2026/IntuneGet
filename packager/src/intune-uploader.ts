@@ -113,7 +113,7 @@ export function resolveIconUrl(iconPath: string | undefined, baseUrl: string): s
 }
 
 type AssignmentIntent = 'required' | 'available' | 'uninstall' | 'updateOnly';
-type GraphAssignmentIntent = 'required' | 'available' | 'uninstall';
+type GraphAssignmentIntent = 'required' | 'available' | 'uninstall' | 'availableWithoutEnrollment';
 
 interface PackageAssignment {
   type: 'allUsers' | 'allDevices' | 'group' | 'exclusionGroup';
@@ -167,6 +167,10 @@ interface GraphAssignmentResponse {
       deviceAndAppManagementAssignmentFilterId?: string;
       deviceAndAppManagementAssignmentFilterType?: string;
     };
+    settings?: {
+      notifications?: string;
+      deliveryOptimizationPriority?: string;
+    } | null;
   }>;
 }
 
@@ -304,6 +308,23 @@ export class IntuneUploader {
   }
 
   /**
+   * Map psadtConfig.restartBehavior to Intune's deviceRestartBehavior, same
+   * mapping as the GitHub workflow so both packager modes behave alike.
+   */
+  private mapRestartBehavior(job: PackagingJob): string {
+    const psadtConfig = this.asRecord(this.asRecord(job.package_config)?.psadtConfig);
+    switch (psadtConfig?.restartBehavior) {
+      case 'Force':
+        return 'force';
+      case 'Prompt':
+      case 'Defer':
+        return 'basedOnReturnCode';
+      default:
+        return 'suppress';
+    }
+  }
+
+  /**
    * Build install/uninstall command lines based on deploy mode from psadtConfig.
    * When deployMode is absent, defaults to Silent so PSADT v4 does not fall back
    * to Auto mode and show UI to logged-in users. Explicit 'Auto' adds no flag.
@@ -364,8 +385,11 @@ export class IntuneUploader {
       fileName: packageFileName,
       installExperience: {
         runAsAccount: job.install_scope === 'user' ? 'user' : 'system',
-        deviceRestartBehavior: 'suppress',
+        deviceRestartBehavior: this.mapRestartBehavior(job),
       },
+      // Lets users uninstall from Company Portal; Intune only honours it for
+      // 'available' assignments, so required deployments are unaffected.
+      allowAvailableUninstall: true,
       returnCodes: [
         { returnCode: 0, type: 'success' },
         { returnCode: 1707, type: 'success' },
@@ -1126,10 +1150,12 @@ export class IntuneUploader {
       }
 
       let intent: GraphAssignmentIntent;
-      if (assignment.intent === 'required') {
-        intent = 'required';
-      } else if (assignment.intent === 'uninstall') {
-        intent = 'uninstall';
+      if (
+        assignment.intent === 'required' ||
+        assignment.intent === 'uninstall' ||
+        assignment.intent === 'availableWithoutEnrollment'
+      ) {
+        intent = assignment.intent;
       } else {
         intent = 'available';
       }
@@ -1155,11 +1181,17 @@ export class IntuneUploader {
 
       // Exclusion assignments do not support settings (Graph rejects them and
       // stores settings: null), so only attach settings to non-exclusion targets.
+      // Keep the source app's settings so a carry-over does not reset them.
       if (targetType !== '#microsoft.graph.exclusionGroupAssignmentTarget') {
+        const existing = assignment.settings;
         mappedAssignment.settings = {
           '@odata.type': '#microsoft.graph.win32LobAppAssignmentSettings',
-          notifications: 'showAll',
-          deliveryOptimizationPriority: 'notConfigured',
+          notifications:
+            existing?.notifications === 'showReboot' || existing?.notifications === 'hideAll'
+              ? existing.notifications
+              : 'showAll',
+          deliveryOptimizationPriority:
+            existing?.deliveryOptimizationPriority === 'foreground' ? 'foreground' : 'notConfigured',
         };
       }
 

@@ -195,9 +195,10 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
     () => stripSourceMarker(deployedConfig?.description ?? pkg.description ?? '')
   );
 
-  // Assignment configuration state - pre-fill from deployed config
+  const { settings: userSettings } = useUserSettings();
+  // Assignment configuration state - pre-fill from deployed config, else user defaults
   const [assignments, setAssignments] = useState<PackageAssignment[]>(
-    deployedConfig?.assignments || []
+    deployedConfig?.assignments || userSettings.defaultAssignments || []
   );
   const [categories, setCategories] = useState<IntuneAppCategorySelection[]>(
     deployedConfig?.categories || []
@@ -211,7 +212,6 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
   const [updatePolicy, setUpdatePolicy] = useState<CartUpdatePolicyValue>(
     deployedConfig?.updatePolicy
   );
-  const { settings: userSettings } = useUserSettings();
   const [carryOverAssignments, setCarryOverAssignments] = useState<boolean>(
     deployedConfig?.assignmentMigration?.carryOverAssignments ??
       Boolean(userSettings.carryOverAssignments)

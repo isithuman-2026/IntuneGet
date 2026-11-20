@@ -12,6 +12,7 @@ type GraphMock = {
 type TestableUploader = {
   createWin32App(graphClient: GraphMock, job: PackagingJob, packageFileName: string): Promise<{ id: string }>;
   addRequirementRules(graphClient: GraphMock, appId: string, job: PackagingJob): Promise<void>;
+  getGraphAssignmentsForApp(graphClient: GraphMock, appId: string): Promise<Array<Record<string, unknown>>>;
 };
 
 const config: PackagerConfig = {
@@ -162,5 +163,70 @@ describe('IntuneUploader Win32 app payload', () => {
 
     expect(graph.get).not.toHaveBeenCalled();
     expect(graph.patch).not.toHaveBeenCalled();
+  });
+
+  it('allows Company Portal uninstall so available apps can be removed by users', async () => {
+    const graph = graphMock();
+    const uploader = new IntuneUploader(config) as unknown as TestableUploader;
+
+    await uploader.createWin32App(graph, packagingJob(), 'Invoke-AppDeployToolkit.intunewin');
+
+    expect(graph.post.mock.calls[0][1]).toMatchObject({ allowAvailableUninstall: true });
+  });
+
+  it('maps psadtConfig.restartBehavior to the Intune restart behavior like the workflow', async () => {
+    const uploader = new IntuneUploader(config) as unknown as TestableUploader;
+    const cases: Array<[string | undefined, string]> = [
+      [undefined, 'suppress'],
+      ['Suppress', 'suppress'],
+      ['Force', 'force'],
+      ['Prompt', 'basedOnReturnCode'],
+      ['Defer', 'basedOnReturnCode'],
+    ];
+    for (const [input, expected] of cases) {
+      const graph = graphMock();
+      await uploader.createWin32App(
+        graph,
+        packagingJob({ package_config: input ? { psadtConfig: { restartBehavior: input } } : {} }),
+        'Invoke-AppDeployToolkit.intunewin',
+      );
+      expect(graph.post.mock.calls[0][1].installExperience.deviceRestartBehavior).toBe(expected);
+    }
+  });
+
+  it('keeps existing assignment settings and intents when carrying assignments over', async () => {
+    const graph = graphMock();
+    graph.get.mockResolvedValue({
+      value: [
+        {
+          intent: 'available',
+          target: { '@odata.type': '#microsoft.graph.groupAssignmentTarget', groupId: 'g1' },
+          settings: { notifications: 'hideAll', deliveryOptimizationPriority: 'foreground' },
+        },
+        {
+          intent: 'availableWithoutEnrollment',
+          target: { '@odata.type': '#microsoft.graph.allLicensedUsersAssignmentTarget' },
+          settings: null,
+        },
+        {
+          intent: 'required',
+          target: { '@odata.type': '#microsoft.graph.exclusionGroupAssignmentTarget', groupId: 'g2' },
+          settings: null,
+        },
+      ],
+    });
+    const uploader = new IntuneUploader(config) as unknown as TestableUploader;
+
+    const mapped = await uploader.getGraphAssignmentsForApp(graph, 'old-app');
+
+    expect(mapped[0]).toMatchObject({
+      intent: 'available',
+      settings: { notifications: 'hideAll', deliveryOptimizationPriority: 'foreground' },
+    });
+    expect(mapped[1]).toMatchObject({
+      intent: 'availableWithoutEnrollment',
+      settings: { notifications: 'showAll', deliveryOptimizationPriority: 'notConfigured' },
+    });
+    expect(mapped[2].settings).toBeUndefined();
   });
 });

@@ -1715,6 +1715,9 @@ jobs:
             msiInformation = $null
             setupFilePath = "Invoke-AppDeployToolkit.exe"
             minimumSupportedWindowsRelease = "1903"
+            # Lets users uninstall from Company Portal; Intune only honours it
+            # for 'available' assignments, so required deployments are unaffected.
+            allowAvailableUninstall = $true
           }
 
           if ($mappedAllowedArchitecture) {
@@ -2420,10 +2423,11 @@ jobs:
                     '@odata.type' = '#microsoft.graph.mobileAppAssignment'
                     intent = $intent
                     target = $target
+                    # Keep the source app's settings so carry-over does not reset them
                     settings = @{
                       '@odata.type' = '#microsoft.graph.win32LobAppAssignmentSettings'
-                      notifications = 'showAll'
-                      deliveryOptimizationPriority = 'notConfigured'
+                      notifications = if ($existing.settings.notifications) { $existing.settings.notifications } else { 'showAll' }
+                      deliveryOptimizationPriority = if ($existing.settings.deliveryOptimizationPriority) { $existing.settings.deliveryOptimizationPriority } else { 'notConfigured' }
                     }
                   }
 

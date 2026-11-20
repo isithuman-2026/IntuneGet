@@ -600,6 +600,32 @@ export async function setAppRules(
   }
 }
 
+/** Toggle whether users may uninstall an 'available' app from Company Portal. */
+export async function setAllowAvailableUninstall(
+  accessToken: string,
+  appId: string,
+  allow: boolean
+): Promise<void> {
+  const response = await fetch(
+    `${GRAPH_API_BASE}/deviceAppManagement/mobileApps/${appId}`,
+    {
+      method: 'PATCH',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        '@odata.type': '#microsoft.graph.win32LobApp',
+        allowAvailableUninstall: allow,
+      }),
+    }
+  );
+
+  if (!response.ok) {
+    throw new Error(`Failed to update uninstall setting: ${await response.text()}`);
+  }
+}
+
 /**
  * Delete an app
  */

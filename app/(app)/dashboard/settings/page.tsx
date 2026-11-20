@@ -27,6 +27,7 @@ import { WebhookManager } from '@/components/settings/WebhookManager';
 import { useUserSettings } from '@/components/providers/UserSettingsProvider';
 import { cn } from '@/lib/utils';
 import { useCartStore } from '@/stores/cart-store';
+import { AssignmentConfig } from '@/components/AssignmentConfig';
 import { clearConsentPending, isConsentPending } from '@/components/AdminConsentBanner';
 
 type SettingsTab = 'general' | 'permissions' | 'notifications' | 'exports' | 'data';
@@ -77,7 +78,7 @@ export default function SettingsPage() {
   const [copiedField, setCopiedField] = useState<string | null>(null);
   const [activePreferenceSave, setActivePreferenceSave] = useState<PreferenceKey | null>(null);
   const [lastUpdatedPreference, setLastUpdatedPreference] = useState<PreferenceKey | null>(null);
-  const { settings: userSettings, isSaving, syncError, setCartAutoOpenOnAdd, setCarryOverAssignments, setSupersedePreviousApp } = useUserSettings();
+  const { settings: userSettings, isSaving, syncError, setCartAutoOpenOnAdd, setCarryOverAssignments, setSupersedePreviousApp, setDefaultAssignments } = useUserSettings();
   const autoOpenOnAdd = userSettings.cartAutoOpenOnAdd;
   const setAutoOpenOnAddStore = useCartStore((state) => state.setAutoOpenOnAdd);
   const handleCartToggle = useCallback(
@@ -505,6 +506,21 @@ export default function SettingsPage() {
                         )}
                       </div>
                     </div>
+                  </motion.section>
+
+                  {/* Default assignments card */}
+                  <motion.section
+                    variants={itemVariants}
+                    className="glass-light rounded-xl p-6 border border-overlay/5 hover:border-accent-cyan/20 transition-colors"
+                  >
+                    <p className="text-text-primary font-medium"><T>Default assignments for new deployments</T></p>
+                    <p className="text-sm text-text-muted mb-4">
+                      <T>Prefilled on every app added to the cart that has no assignments yet. You can still change them per app before deploying.</T>
+                    </p>
+                    <AssignmentConfig
+                      assignments={userSettings.defaultAssignments ?? []}
+                      onChange={(value) => void setDefaultAssignments(value)}
+                    />
                   </motion.section>
                 </motion.div>
               </motion.div>

@@ -110,6 +110,36 @@ describe('PATCH /api/intune/apps/[id]/edit - instant path', () => {
     expect(body.results.categories).toBe('ok');
   });
 
+  it('toggles Company Portal uninstall on an existing app via Graph', async () => {
+    const { sqliteDb } = await import('@/lib/db/sqlite');
+    await sqliteDb.uploadHistory.create({
+      user_id: 'user-1', winget_id: 'Foxit.FoxitReader', version: '2026.1.3.36551',
+      display_name: 'Foxit PDF Reader', intune_app_id: 'app-abc', intune_tenant_id: 'tenant-1',
+    });
+
+    const setAllowAvailableUninstall = vi.fn().mockResolvedValue(undefined);
+    vi.doMock('@/lib/intune-api', () => ({
+      assignToGroups: vi.fn(),
+      syncAppCategories: vi.fn(),
+      setAllowAvailableUninstall,
+    }));
+
+    const { PATCH } = await import('./route');
+    const response = await PATCH(
+      new Request('http://x/api/intune/apps/app-abc/edit', {
+        method: 'PATCH',
+        headers: { Authorization: 'Bearer x', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ allowAvailableUninstall: false }),
+      }),
+      { params: Promise.resolve({ id: 'app-abc' }) }
+    );
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.results.allowAvailableUninstall).toBe('ok');
+    expect(setAllowAvailableUninstall).toHaveBeenCalledWith('fake-graph-token', 'app-abc', false);
+  });
+
   it('rejects a redeploy-path edit without confirmRedeploy', async () => {
     const { sqliteDb } = await import('@/lib/db/sqlite');
     await sqliteDb.uploadHistory.create({

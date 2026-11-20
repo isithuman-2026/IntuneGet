@@ -5,7 +5,7 @@
 
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import type { CartItem, Win32CartItem, StoreCartItem, NewCartItem } from '@/types/upload';
+import type { CartItem, Win32CartItem, StoreCartItem, NewCartItem, PackageAssignment } from '@/types/upload';
 import { isStoreCartItem, isWin32CartItem } from '@/types/upload';
 import type { DetectionRule, RegistryDetectionRule } from '@/types/intune';
 import type { NormalizedInstaller, WingetScope } from '@/types/winget';
@@ -17,6 +17,8 @@ interface CartState {
   items: CartItem[];
   isOpen: boolean;
   autoOpenOnAdd: boolean;
+  // Synced from user settings; applied to new items without assignments
+  defaultAssignments: PackageAssignment[];
 }
 
 interface CartActions {
@@ -24,6 +26,7 @@ interface CartActions {
   addItemSilent: (item: NewCartItem) => void;
   setAutoOpenOnAdd: (enabled: boolean) => void;
   setAutoOpenOnAddFromServer: (enabled: boolean) => void;
+  setDefaultAssignments: (assignments: PackageAssignment[]) => void;
   removeItem: (id: string) => void;
   updateItem: (id: string, updates: Partial<CartItem>) => void;
   clearCart: () => void;
@@ -85,6 +88,11 @@ function applyRegistryMarkerPath(
   };
 }
 
+function withDefaultAssignments(item: NewCartItem, defaults: PackageAssignment[]): NewCartItem {
+  if (item.assignments?.length || defaults.length === 0) return item;
+  return { ...item, assignments: defaults.map((a) => ({ ...a })) };
+}
+
 function generateCartItemId(item: NewCartItem): string {
   if ('appSource' in item && item.appSource === 'store') {
     const store = item as Omit<StoreCartItem, 'id' | 'addedAt'>;
@@ -100,8 +108,10 @@ export const useCartStore = create<CartStore>()(
       items: [],
       isOpen: false,
       autoOpenOnAdd: true,
+      defaultAssignments: [],
 
-      addItem: (item) => {
+      addItem: (newItem) => {
+        const item = withDefaultAssignments(newItem, get().defaultAssignments);
         const id = generateCartItemId(item);
         const shouldOpenCart = get().autoOpenOnAdd;
         set((state) => ({
@@ -117,7 +127,8 @@ export const useCartStore = create<CartStore>()(
         }));
       },
 
-      addItemSilent: (item) => {
+      addItemSilent: (newItem) => {
+        const item = withDefaultAssignments(newItem, get().defaultAssignments);
         const id = generateCartItemId(item);
         set((state) => ({
           items: [
@@ -143,6 +154,9 @@ export const useCartStore = create<CartStore>()(
       },
       setAutoOpenOnAddFromServer: (enabled) => {
         set({ autoOpenOnAdd: enabled });
+      },
+      setDefaultAssignments: (assignments) => {
+        set({ defaultAssignments: assignments });
       },
 
       updateItem: (id, updates) => {

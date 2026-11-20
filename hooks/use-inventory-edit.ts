@@ -6,6 +6,7 @@ import type { UpdatePolicyType } from '@/types/update-policies';
 export interface EditAppInstantFields {
   assignments?: Win32LobAppAssignment[];
   categories?: { id: string }[];
+  allowAvailableUninstall?: boolean;
   policyType?: UpdatePolicyType;
   delayDays?: number;
 }
