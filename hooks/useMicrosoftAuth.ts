@@ -39,6 +39,9 @@ export function useMicrosoftAuth() {
   // Track sign-out in progress to prevent auth guard redirects
   const [isSigningOut, setIsSigningOut] = useState(false);
 
+  // Last interactive sign-in failure, so the page can tell "not assigned" from a cancel.
+  const [signInError, setSignInError] = useState<unknown | null>(null);
+
   // Cache the current token to check expiry
   const cachedTokenRef = useRef<string | null>(null);
   const tokenExpiryRef = useRef<number | null>(null);
@@ -172,6 +175,7 @@ export function useMicrosoftAuth() {
   const signIn = useCallback(async () => {
     try {
       const result = await instance.loginPopup({ scopes: graphScopes });
+      setSignInError(null);
       if (result?.account) {
         // Pin the account we just signed in with so subsequent silent token
         // calls target it instead of blindly using accounts[0], which breaks
@@ -182,7 +186,8 @@ export function useMicrosoftAuth() {
         await trackSignInToServer(result.account, 'popup');
       }
       return !!result;
-    } catch {
+    } catch (err) {
+      setSignInError(err);
       return false;
     }
   }, [instance]);
@@ -292,6 +297,7 @@ export function useMicrosoftAuth() {
     isTokenExpiring,
     getTokenExpiryTime,
     signIn,
+    signInError,
     signInSelectAccount,
     signInRedirect,
     signOut,
