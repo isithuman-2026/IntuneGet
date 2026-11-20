@@ -104,7 +104,12 @@ export class AutoUpdateTriggerSqlite {
     if (carryOverAssignments && sourceAppId) {
       const token = await getServicePrincipalToken(policy.tenant_id);
       if (token) {
-        const candidates = await sqliteUploadHistory.listAppIdsForWinget(policy.tenant_id, policy.winget_id);
+        const variantConfig = policy.deployment_config as DeploymentConfig;
+        const candidates = await sqliteUploadHistory.listAppIdsForWinget(policy.tenant_id, policy.winget_id, {
+          userId: policy.user_id,
+          architecture: variantConfig.architecture,
+          installScope: variantConfig.installScope,
+        });
         sourceAppId = await pickAssignedSourceApp(sourceAppId, candidates, async (appId) => {
           if (!(await getApp(token, appId))) return null;
           return (await getAppAssignments(token, appId)).length;

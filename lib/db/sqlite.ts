@@ -1505,11 +1505,26 @@ export const sqliteUserSettings = {
  * Provides direct queries for edit/rollback decision gates.
  */
 export const sqliteUploadHistory = {
-  /** Intune app ids deployed for one winget app in a tenant, newest first. */
-  async listAppIdsForWinget(tenantId: string, wingetId: string): Promise<string[]> {
+  /**
+   * Intune app ids deployed for one winget app in a tenant, newest first,
+   * limited to the same user, architecture and install scope so a different
+   * variant of the app (e.g. arm64 or per-user) is never picked as a
+   * carry-over/supersede/prune source. Rows without a packaging job are
+   * excluded because their variant cannot be verified.
+   */
+  async listAppIdsForWinget(
+    tenantId: string,
+    wingetId: string,
+    variant: { userId: string; architecture: string; installScope: string }
+  ): Promise<string[]> {
     const rows = getDb()
-      .prepare('SELECT DISTINCT intune_app_id FROM upload_history WHERE intune_tenant_id = ? AND winget_id = ? AND intune_app_id IS NOT NULL ORDER BY deployed_at DESC')
-      .all(tenantId, wingetId) as { intune_app_id: string }[];
+      .prepare(`SELECT uh.intune_app_id FROM upload_history uh
+        JOIN packaging_jobs pj ON pj.id = uh.packaging_job_id
+        WHERE uh.intune_tenant_id = ? AND uh.winget_id = ? AND uh.intune_app_id IS NOT NULL
+          AND uh.user_id = ? AND pj.architecture = ? AND pj.install_scope = ?
+        GROUP BY uh.intune_app_id
+        ORDER BY MAX(uh.deployed_at) DESC`)
+      .all(tenantId, wingetId, variant.userId, variant.architecture, variant.installScope) as { intune_app_id: string }[];
     return rows.map((r) => r.intune_app_id);
   },
 
