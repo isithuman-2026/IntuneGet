@@ -31,3 +31,14 @@ describe('auto-prune safety-gate logic', () => {
     expect(isSafeToDelete({ installedDeviceCount: 0, pendingInstallDeviceCount: 1 })).toBe(false);
   });
 });
+
+describe('isRetained', () => {
+  it('keeps the newest N superseded copies and releases older ones', async () => {
+    const { isRetained } = await import('./prune');
+    const newestFirst = ['row-v3', 'row-v2', 'row-v1'];
+    expect(isRetained('row-v3', newestFirst, 1)).toBe(true);
+    expect(isRetained('row-v2', newestFirst, 1)).toBe(false);
+    expect(isRetained('row-v2', newestFirst, 2)).toBe(true);
+    expect(isRetained('row-v3', newestFirst, 0)).toBe(false);
+  });
+});

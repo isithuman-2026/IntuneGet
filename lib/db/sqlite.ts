@@ -1505,6 +1505,13 @@ export const sqliteUserSettings = {
  * Provides direct queries for edit/rollback decision gates.
  */
 export const sqliteUploadHistory = {
+  async getByPackagingJobId(packagingJobId: string): Promise<UploadHistoryRecord | null> {
+    const row = getDb()
+      .prepare('SELECT * FROM upload_history WHERE packaging_job_id = ? AND intune_app_id IS NOT NULL ORDER BY deployed_at DESC LIMIT 1')
+      .get(packagingJobId);
+    return (row as UploadHistoryRecord | undefined) ?? null;
+  },
+
   /**
    * Intune app ids deployed for one winget app in a tenant, newest first,
    * limited to the same user, architecture and install scope so a different
@@ -1574,6 +1581,30 @@ export const sqlitePendingAppPrune = {
     return database
       .prepare(`SELECT * FROM pending_app_prune WHERE status = 'pending' AND superseded_at <= ?`)
       .all(cutoffIso) as PendingAppPrune[];
+  },
+
+  /**
+   * Pending prune row ids for the same app variant as `row` (tenant, user,
+   * winget id, architecture, install scope), most recently superseded first.
+   */
+  async listPendingIdsForVariant(row: PendingAppPrune): Promise<string[]> {
+    const rows = getDb()
+      .prepare(`SELECT p.id FROM pending_app_prune p
+        JOIN packaging_jobs pj ON pj.id = p.job_id
+        JOIN packaging_jobs me ON me.id = ?
+        WHERE p.status = 'pending' AND p.tenant_id = ?
+          AND pj.user_id = me.user_id AND pj.winget_id = me.winget_id
+          AND pj.architecture = me.architecture AND pj.install_scope = me.install_scope
+        ORDER BY p.superseded_at DESC, p.created_at DESC`)
+      .all(row.job_id, row.tenant_id) as { id: string }[];
+    return rows.map((r) => r.id);
+  },
+
+  /** Stop pruning an app that a rollback brought back into use. */
+  async markRestored(tenantId: string, oldAppId: string): Promise<void> {
+    getDb()
+      .prepare(`UPDATE pending_app_prune SET status = 'restored', last_checked_at = ? WHERE tenant_id = ? AND old_app_id = ? AND status = 'pending'`)
+      .run(new Date().toISOString(), tenantId, oldAppId);
   },
 
   async setNewAppId(id: string, newAppId: string): Promise<void> {

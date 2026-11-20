@@ -323,6 +323,11 @@ export function InventoryAppDetails({ appId, onClose, onUpdate }: InventoryAppDe
               <h4 className="text-xs font-medium text-text-muted uppercase tracking-wider mb-3">
                 Version History
               </h4>
+              <p className="text-xs text-status-warning mb-3">
+                Rolling back installs an older version over a newer one. Some apps refuse to downgrade and need the
+                current version uninstalled first; for some (e.g. ones that migrate their data or settings on upgrade)
+                rollback is not possible at all. Check the vendor&apos;s guidance and try a pilot group first.
+              </p>
               <div className="space-y-2">
                 {versionHistory.versions.map((v) => (
                   <div key={v.id} className="flex items-center justify-between p-3 bg-bg-elevated rounded-lg border border-overlay/5">
@@ -333,7 +338,9 @@ export function InventoryAppDetails({ appId, onClose, onUpdate }: InventoryAppDe
                       disabled={rollback.isPending}
                       onClick={() => {
                         const confirmed = window.confirm(
-                          `Roll back to v${v.version}? This redeploys that version's exact installer with current assignments.`
+                          `Roll back to v${v.version}?\n\n` +
+                            `If that version is still kept in Intune, its app gets the current assignments straight away; otherwise its exact installer is repackaged and deployed.\n\n` +
+                            `Warning: some apps cannot downgrade in place and need the current version uninstalled first, and some cannot be rolled back at all. Devices may end up with neither version working. Test on a pilot group first.`
                         );
                         if (confirmed) rollback.mutate({ packagingJobId: v.id });
                       }}
@@ -345,6 +352,13 @@ export function InventoryAppDetails({ appId, onClose, onUpdate }: InventoryAppDe
               </div>
               {rollback.isError && (
                 <p className="text-sm text-status-error mt-2">{rollback.error.message}</p>
+              )}
+              {rollback.isSuccess && (
+                <p className="text-sm text-text-secondary mt-2">
+                  {rollback.data.restoredIntuneAppId
+                    ? 'Assignments moved to the kept copy of that version in Intune.'
+                    : 'Repackaging that version; it will deploy when the job finishes.'}
+                </p>
               )}
             </div>
           )}

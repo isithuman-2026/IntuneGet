@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { parseAccessToken } from '@/lib/auth-utils';
 import { isSqliteMode, getDatabase } from '@/lib/db';
-import { sqliteUploadHistory, sqliteUpdatePolicies } from '@/lib/db/sqlite';
+import { sqliteUploadHistory, sqliteUpdatePolicies, sqlitePendingAppPrune } from '@/lib/db/sqlite';
 import { getServicePrincipalToken } from '@/lib/intune/graph-client';
-import { getAppAssignments, getAppCategories } from '@/lib/intune-api';
+import { getApp, getAppAssignments, getAppCategories, assignToGroups, removeRelationshipTo } from '@/lib/intune-api';
 import { AutoUpdateTriggerSqlite } from '@/lib/auto-update/trigger-sqlite';
 import type { DeploymentConfig } from '@/types/update-policies';
 import type { DetectionRule, Win32LobAppAssignment } from '@/types/intune';
@@ -77,6 +77,25 @@ export async function POST(
     getAppAssignments(graphToken, intuneAppId),
     getAppCategories(graphToken, intuneAppId),
   ]);
+
+  // Fast path: the target version's Intune app is still kept (auto-prune
+  // keeps the last AUTO_PRUNE_KEEP_PREVIOUS copies). Move the assignments
+  // back to it instead of repackaging.
+  const keptCopy = await sqliteUploadHistory.getByPackagingJobId(targetJob.id);
+  if (
+    keptCopy?.intune_app_id &&
+    keptCopy.intune_app_id !== intuneAppId &&
+    (await getApp(graphToken, keptCopy.intune_app_id))
+  ) {
+    const keptAppId = keptCopy.intune_app_id;
+    // Remove the current app's supersedence of the kept copy first, or
+    // Intune upgrades devices straight back to the current version.
+    await removeRelationshipTo(graphToken, intuneAppId, keptAppId);
+    await assignToGroups(graphToken, keptAppId, currentAssignments);
+    await assignToGroups(graphToken, intuneAppId, []);
+    await sqlitePendingAppPrune.markRestored(user.tenantId, keptAppId);
+    return NextResponse.json({ restoredIntuneAppId: keptAppId });
+  }
 
   const overriddenConfig: DeploymentConfig = {
     displayName: targetJob.display_name,

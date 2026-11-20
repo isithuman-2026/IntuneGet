@@ -27,7 +27,7 @@ export function useAppVersionHistory(intuneAppId: string | null) {
 export function useRollbackApp(intuneAppId: string) {
   const { getAccessToken } = useMicrosoftAuth();
   const queryClient = useQueryClient();
-  return useMutation<{ packagingJobId: string }, Error, { packagingJobId: string }>({
+  return useMutation<{ packagingJobId?: string; restoredIntuneAppId?: string }, Error, { packagingJobId: string }>({
     mutationFn: async ({ packagingJobId }) => {
       const token = await getAccessToken();
       const response = await fetch(`/api/intune/apps/${intuneAppId}/rollback`, {

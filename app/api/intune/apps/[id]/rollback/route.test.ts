@@ -184,4 +184,60 @@ describe('POST /api/intune/apps/[id]/rollback', () => {
     expect(body.packagingJobId).toBe('rollback-job-id');
   });
 
+
+  it('reuses the kept Intune copy of the target version instead of repackaging', async () => {
+    const { sqliteDb, sqlitePendingAppPrune } = await import('@/lib/db/sqlite');
+    // The route reads jobs via getDatabase() (a separately required module
+    // instance) and upload_history via the imported one: create the same job in both.
+    const jobFields = {
+      id: 'job-old', user_id: 'user-1', winget_id: 'Foxit.FoxitReader', version: '2026.1.3.36551',
+      display_name: 'Foxit PDF Reader', publisher: 'Foxit', architecture: 'x64',
+      installer_type: 'exe', installer_url: 'https://x/foxit-old.exe',
+      install_command: 'x', uninstall_command: 'x', install_scope: 'machine', status: 'deployed' as const,
+    };
+    const { getDatabase } = await import('@/lib/db');
+    await getDatabase().jobs.create(jobFields);
+    const oldJob = await sqliteDb.jobs.create(jobFields);
+    await sqliteDb.uploadHistory.create({
+      user_id: 'user-1', winget_id: 'Foxit.FoxitReader', version: '2026.1.3.36551',
+      display_name: 'Foxit PDF Reader', intune_app_id: 'app-old', intune_tenant_id: 'tenant-1',
+      packaging_job_id: oldJob.id,
+    });
+    await sqliteDb.uploadHistory.create({
+      user_id: 'user-1', winget_id: 'Foxit.FoxitReader', version: '2026.2.0.39747',
+      display_name: 'Foxit PDF Reader', intune_app_id: 'app-new', intune_tenant_id: 'tenant-1',
+    });
+    const { id: pruneId } = await sqlitePendingAppPrune.create({ oldAppId: 'app-old', jobId: oldJob.id, tenantId: 'tenant-1' });
+
+    const current = [{ '@odata.type': '#microsoft.graph.mobileAppAssignment', intent: 'available', target: { '@odata.type': '#microsoft.graph.allLicensedUsersAssignmentTarget' } }];
+    const assignToGroups = vi.fn().mockResolvedValue(undefined);
+    const removeRelationshipTo = vi.fn().mockResolvedValue(undefined);
+    vi.doMock('@/lib/intune-api', () => ({
+      getApp: vi.fn().mockResolvedValue({ id: 'app-old' }),
+      getAppAssignments: vi.fn().mockResolvedValue(current),
+      getAppCategories: vi.fn().mockResolvedValue([]),
+      assignToGroups,
+      removeRelationshipTo,
+    }));
+
+    const { POST } = await import('./route');
+    const response = await POST(
+      new Request('http://x/api/intune/apps/app-new/rollback', {
+        method: 'POST',
+        headers: { Authorization: 'Bearer x', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ packagingJobId: oldJob.id }),
+      }),
+      { params: Promise.resolve({ id: 'app-new' }) }
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ restoredIntuneAppId: 'app-old' });
+    // Supersedence from the current app must go first, or Intune upgrades devices straight back
+    expect(removeRelationshipTo).toHaveBeenCalledWith('fake-graph-token', 'app-new', 'app-old');
+    expect(assignToGroups).toHaveBeenCalledWith('fake-graph-token', 'app-old', current);
+    expect(assignToGroups).toHaveBeenCalledWith('fake-graph-token', 'app-new', []);
+    // The restored copy must never be auto-pruned afterwards
+    const row = (await sqlitePendingAppPrune.listDue(new Date(Date.now() + 864e5 * 365).toISOString())).find((r) => r.id === pruneId);
+    expect(row).toBeUndefined();
+  });
 });

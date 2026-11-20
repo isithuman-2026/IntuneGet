@@ -12,9 +12,17 @@
 import { getDatabase } from '@/lib/db';
 import { sqlitePendingAppPrune, type PendingAppPrune } from '@/lib/db/sqlite';
 import { getServicePrincipalToken } from '@/lib/intune/graph-client';
-import { getAppInstallSummary, clearAppRelationships, deleteApp, type AppInstallSummary } from '@/lib/intune-api';
+import { getAppInstallSummary, clearAppRelationships, removeRelationshipTo, deleteApp, type AppInstallSummary } from '@/lib/intune-api';
 
 const DEFAULT_GRACE_DAYS = 14;
+// Superseded copies kept in Intune (unassigned) so a rollback can reuse them
+// without repackaging. 0 = prune every superseded copy as before.
+const DEFAULT_KEEP_PREVIOUS = 1;
+
+/** Pure: is this prune row one of the newest `keep` superseded copies? Exported for the self-check. */
+export function isRetained(rowId: string, newestFirstRowIds: string[], keep: number): boolean {
+  return newestFirstRowIds.slice(0, Math.max(0, keep)).includes(rowId);
+}
 
 /** Pure: has the grace period elapsed for this row? Exported for the self-check. */
 export function isPastGrace(supersededAtIso: string, graceDays: number, now: Date = new Date()): boolean {
@@ -64,6 +72,15 @@ export async function runAppPrune(): Promise<RunAppPruneResult> {
 async function processRow(row: PendingAppPrune, result: RunAppPruneResult): Promise<void> {
   const db = getDatabase();
 
+  const keepEnv = process.env.AUTO_PRUNE_KEEP_PREVIOUS;
+  const keep = keepEnv !== undefined && keepEnv !== '' && Number.isFinite(Number(keepEnv)) ? Number(keepEnv) : DEFAULT_KEEP_PREVIOUS;
+  if (isRetained(row.id, await sqlitePendingAppPrune.listPendingIdsForVariant(row), keep)) {
+    result.skipped++;
+    await sqlitePendingAppPrune.logAttempt(row.id, 'skipped', `retained as one of the last ${keep} previous version(s)`);
+    await sqlitePendingAppPrune.touchChecked(row.id);
+    return;
+  }
+
   let newAppId = row.new_app_id;
   if (!newAppId) {
     const job = await db.jobs.getById(row.job_id);
@@ -95,7 +112,11 @@ async function processRow(row: PendingAppPrune, result: RunAppPruneResult): Prom
       return;
     }
 
-    const relWarning = await clearAppRelationships(token, newAppId);
+    // Drop only the supersedence edge to the app being deleted; the new app's
+    // dependencies and other relationships stay. The old app's own outgoing
+    // edges go with it (Graph refuses to delete a supersedence parent).
+    await removeRelationshipTo(token, newAppId, row.old_app_id);
+    const relWarning = await clearAppRelationships(token, row.old_app_id);
     if (relWarning) throw new Error(relWarning);
 
     await deleteApp(token, row.old_app_id);

@@ -101,3 +101,19 @@ describe('replaceAppContentInPlace', () => {
     expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 });
+
+describe('outgoingRelationshipsExcept', () => {
+  it('keeps dependencies and other supersedences, drops only the edge to the target and incoming edges', async () => {
+    const { outgoingRelationshipsExcept } = await import('./intune-api');
+    const rels = [
+      { '@odata.type': '#microsoft.graph.mobileAppDependency', targetId: 'git', targetType: 'child', dependencyType: 'autoInstall' },
+      { '@odata.type': '#microsoft.graph.mobileAppSupersedence', targetId: 'old', targetType: 'child', supersedenceType: 'update' },
+      { '@odata.type': '#microsoft.graph.mobileAppSupersedence', targetId: 'older', targetType: 'child', supersedenceType: 'replace' },
+      { '@odata.type': '#microsoft.graph.mobileAppSupersedence', targetId: 'newer', targetType: 'parent', supersedenceType: 'update' },
+    ];
+    expect(outgoingRelationshipsExcept(rels, 'old')).toEqual([
+      { '@odata.type': '#microsoft.graph.mobileAppDependency', targetId: 'git', dependencyType: 'autoInstall' },
+      { '@odata.type': '#microsoft.graph.mobileAppSupersedence', targetId: 'older', supersedenceType: 'replace' },
+    ]);
+  });
+});

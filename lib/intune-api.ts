@@ -940,6 +940,60 @@ export async function getAppInstallSummary(
   return { installedDeviceCount, pendingInstallDeviceCount };
 }
 
+type GraphRelationship = {
+  '@odata.type': string;
+  targetId: string;
+  targetType?: string;
+  dependencyType?: string;
+  supersedenceType?: string;
+};
+
+/**
+ * Pure: the app's own outgoing relationships (targetType 'child') minus the
+ * edge to targetId, shaped for updateRelationships. Incoming 'parent' edges
+ * belong to other apps and must not be sent.
+ */
+export function outgoingRelationshipsExcept(relationships: GraphRelationship[], targetId: string) {
+  return relationships
+    .filter((r) => r.targetType === 'child' && r.targetId !== targetId)
+    .map((r) => ({
+      '@odata.type': r['@odata.type'],
+      targetId: r.targetId,
+      ...(r.dependencyType ? { dependencyType: r.dependencyType } : {}),
+      ...(r.supersedenceType ? { supersedenceType: r.supersedenceType } : {}),
+    }));
+}
+
+/**
+ * Remove only the relationship from appId to targetId, keeping every other
+ * relationship (dependencies, other supersedences). updateRelationships
+ * replaces the whole list, so the rest is read and sent back.
+ */
+export async function removeRelationshipTo(
+  accessToken: string,
+  appId: string,
+  targetId: string
+): Promise<void> {
+  const current = await fetchAllGraphPages<GraphRelationship>(
+    `${GRAPH_API_BASE}/deviceAppManagement/mobileApps/${appId}/relationships`,
+    accessToken,
+    'Failed to get app relationships'
+  );
+  if (!current.some((r) => r.targetType === 'child' && r.targetId === targetId)) return;
+
+  const response = await fetch(
+    `${GRAPH_API_BASE}/deviceAppManagement/mobileApps/${appId}/updateRelationships`,
+    {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ relationships: outgoingRelationshipsExcept(current, targetId) }),
+    }
+  );
+  if (!response.ok) {
+    throw new Error(`Failed to remove relationship ${appId} -> ${targetId}: ${await response.text()}`);
+  }
+}
+
 /**
  * Clear all relationships (dependency/supersedence) on an app. Graph's
  * updateRelationships REPLACES the whole list, so an empty array removes
