@@ -19,9 +19,8 @@ const PLAUSIBLE_DOMAIN = process.env.NEXT_PUBLIC_PLAUSIBLE_DOMAIN;
 
 export const metadata: Metadata = {
   metadataBase: new URL("https://intuneget.com"),
-  title: "IntuneGet | Free Intune App Deployment Tool - Deploy Winget Apps in Minutes",
-  description:
-    "Deploy any Winget app to Microsoft Intune in about 5 minutes. Free, open-source tool. No scripting, no IntuneWin packaging, no per-device licensing.",
+  title: "IntuneGet | Internal deployment console",
+  description: "Internal console for deploying apps to Microsoft Intune.",
   keywords: [
     "Intune app deployment",
     "Winget Intune",
@@ -46,9 +45,8 @@ export const metadata: Metadata = {
     type: "website",
     locale: "en_US",
     url: "https://intuneget.com",
-    title: "IntuneGet - Deploy Winget Apps to Intune for Free",
-    description:
-      "Deploy any Winget app to Microsoft Intune in about 5 minutes. Free, open-source tool with no scripting required.",
+    title: "IntuneGet | Internal deployment console",
+    description: "Internal console for deploying apps to Microsoft Intune.",
     siteName: "IntuneGet",
     images: [
       {
@@ -61,9 +59,8 @@ export const metadata: Metadata = {
   },
   twitter: {
     card: "summary_large_image",
-    title: "IntuneGet - Deploy Winget Apps to Intune for Free",
-    description:
-      "Deploy any Winget app to Microsoft Intune in about 5 minutes. Free, open-source tool with no scripting required.",
+    title: "IntuneGet | Internal deployment console",
+    description: "Internal console for deploying apps to Microsoft Intune.",
     images: ["/og-image.png"],
   },
   icons: {
