@@ -1,49 +1,61 @@
+> [!IMPORTANT]
+> **This is a fork.** IntuneGet is created and maintained by Ugur Koc: **[ugurkocde/IntuneGet](https://github.com/ugurkocde/IntuneGet)**.
+> All credit for the original project goes to its authors and contributors. For the hosted service at [intuneget.com](https://intuneget.com), mainline releases and support, use the upstream project.
+
 <div align="center">
 
 <img src="public/logo-512.png" alt="IntuneGet Logo" width="120" height="120" />
 
-# IntuneGet
+# IntuneGet (self-hosted fork)
 
-**Deploy Winget applications to Microsoft Intune with a single click.**
+**Deploy Winget apps to Microsoft Intune, self-hosted on SQLite.**
 
-Skip the manual packaging workflow and deploy Winget apps to Intune in seconds.
+</div>
 
-**10,000+ Winget apps** | **One-click deployment** | **Multi-tenant support** | **Free and open source**
+This fork runs IntuneGet as a single self-hosted container on SQLite (`DATABASE_MODE=sqlite`) with no Supabase dependency, packaging through GitHub Actions. It adds update automation, rollback and safer assignment handling for admins who run it for their own tenant. It is a lab pilot, not a supported distribution.
 
-[![CI](https://img.shields.io/github/actions/workflow/status/ugurkocde/IntuneGet/ci.yml?branch=main&style=flat-square&label=CI)](https://github.com/ugurkocde/IntuneGet/actions/workflows/ci.yml)
-[![Tests](https://img.shields.io/github/actions/workflow/status/ugurkocde/IntuneGet/ci.yml?branch=main&style=flat-square&label=Tests)](https://github.com/ugurkocde/IntuneGet/actions/workflows/ci.yml)
-[![Docker](https://img.shields.io/github/actions/workflow/status/ugurkocde/IntuneGet/ci.yml?branch=main&style=flat-square&label=Docker&logo=docker)](https://github.com/ugurkocde/IntuneGet/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-AGPL--3.0-blue?style=flat-square)](LICENSE)
-[![Release](https://img.shields.io/github/v/release/ugurkocde/IntuneGet?style=flat-square)](https://github.com/ugurkocde/IntuneGet/releases)
-[![Stars](https://img.shields.io/github/stars/ugurkocde/IntuneGet?style=flat-square)](https://github.com/ugurkocde/IntuneGet/stargazers)
-[![Next.js](https://img.shields.io/badge/Next.js-14-black?style=flat-square&logo=next.js)](https://nextjs.org/)
-[![TypeScript](https://img.shields.io/badge/TypeScript-5-blue?style=flat-square&logo=typescript)](https://www.typescriptlang.org/)
-
-[![Get Started](https://img.shields.io/badge/Get_Started-intuneget.com-2563eb?style=for-the-badge)](https://intuneget.com)
-[![Documentation](https://img.shields.io/badge/Documentation-Self--Hosting-555555?style=for-the-badge)](docs/SELF_HOSTING.md)
-[![Contributing](https://img.shields.io/badge/Contributing-Guide-555555?style=for-the-badge)](CONTRIBUTING.md)
-
-</div>
+[![Upstream](https://img.shields.io/badge/upstream-ugurkocde%2FIntuneGet-555555?style=flat-square&logo=github)](https://github.com/ugurkocde/IntuneGet)
 
 ---
 
-<div align="center">
+## What's different in this fork
 
-**[Features](#features)** | **[Quick Start](#quick-start)** | **[Architecture](#architecture)** | **[How It Compares](#how-it-compares)** | **[Documentation](#documentation)**
+### Self-hosted SQLite mode
 
-</div>
+- SQLite branches for user settings, notification preferences, update policies and update history, so these work without Supabase
+- In-process 24-hour scheduler for update detection
+- Webhook notifications for deployed, failed and update-available events; duplicate webhook URLs are rejected
+- Routes that called Supabase unconditionally (job cancel and dismiss, ESP profile listing, the QA gate) now check for it first
+- The GitHub Actions status callback can be exposed on its own path behind an access-controlled tunnel, so the app needs no public DNS
 
----
+### Updates and rollback
 
-## This fork
+| Stage | Behaviour |
+|:------|:----------|
+| Detect | Daily check against the catalog for newer versions of deployed apps |
+| Update | Auto-update packages the new version and supersedes the previous Intune app |
+| Carry over | Assignments move from the copy that actually holds them, keeping their notification and delivery settings |
+| Keep | The newest superseded version stays in Intune, unassigned (`AUTO_PRUNE_KEEP_PREVIOUS`, default 1) |
+| Prune | Older superseded copies are deleted once no devices have them, after a grace period (`AUTO_PRUNE_OLD_APPS`, opt-in) |
+| Roll back | Moves assignments back to a kept copy, or repackages the older version when no copy is kept; the UI warns that some apps cannot downgrade |
 
-Self-hosted lab pilot on a home server (node1), tracking a few divergences from upstream to run without Supabase:
+### Assignments and deployment defaults
 
-- **SQLite mode** (`DATABASE_MODE=sqlite`) — no Supabase dependency. Several routes that unconditionally called the Supabase client now guard on `isSupabaseServerConfigured()` first (packaging job cancel/dismiss, ESP profile listing, the QA gate). One route (`claim`, for the "Discovered Apps" unmanaged-app claim flow) still has no SQLite equivalent at all — that's the one open gap.
-- **Narrow Cloudflare Tunnel callback path** — the self-hosted app has no public DNS record, so the GitHub Actions packaging workflow can't reach its status callback directly. A path-scoped Cloudflare Tunnel + Access Service Token exposes only `/api/package/callback`, nothing else.
-- A handful of other real bugs found and fixed running this in SQLite mode against a live tenant: a SQLite `INSERT` column-count mismatch, a QA-gate dispatch script path referenced in the packaging workflow that never actually existed upstream, and others.
+- Per-user default assignments are prefilled on every new deployment
+- New apps allow uninstall from Company Portal for *available* assignments; this can be toggled per app
+- Redeploying an app that already exists merges the assignments into it instead of creating a duplicate
+- Auto-prune removes only the supersedence link to the app it deletes; dependencies stay intact
 
-Full running log of every bug, fix, and infra decision (exact IDs, error text, dates) lives in `BUGFIXES.md` at the repo root — gitignored, local to this checkout only.
+### Inventory editing
+
+- Edit assignments, categories, update policy and delay on a deployed app without repackaging
+- Change install and uninstall commands or detection rules with a confirmed redeploy
+- Version history with rollback
+
+### Status
+
+A lab pilot, deliberately behind upstream: it does not include upstream changes made after it forked. Some upstream features (for example the Discovered Apps claim flow) have no SQLite equivalent yet.
 
 ---
 
@@ -82,39 +94,17 @@ Full running log of every bug, fix, and infra decision (exact IDs, error text, d
 
 ## Quick Start
 
-<div align="center">
-
-[![Try Hosted](https://img.shields.io/badge/Try_Hosted-intuneget.com-2563eb?style=for-the-badge)](https://intuneget.com)
-[![Self--Host](https://img.shields.io/badge/Self--Host-Docker-2496ED?style=for-the-badge&logo=docker&logoColor=white)](docs/SELF_HOSTING.md)
-[![Deploy](https://img.shields.io/badge/Deploy-Vercel-000000?style=for-the-badge&logo=vercel&logoColor=white)](https://vercel.com/new/clone?repository-url=https://github.com/ugurkocde/IntuneGet)
-
-</div>
-
-### Hosted Version (Recommended)
-
-The fastest way to get started:
-
-<div align="center">
-
-[![Try IntuneGet](https://img.shields.io/badge/Try_IntuneGet-intuneget.com-blue?style=for-the-badge)](https://intuneget.com)
-
-</div>
-
-### Self-Host with Docker
-
 ```bash
-git clone https://github.com/ugurkocde/IntuneGet.git
+git clone https://github.com/isithuman-2026/IntuneGet.git
 cd IntuneGet
 cp .env.example .env.local
-# Edit .env.local with your configuration
+# Set DATABASE_MODE=sqlite, PACKAGER_MODE=github and your Entra app registration
 docker-compose up -d
 ```
 
-### Deploy to Vercel
+The packaging workflow (`.github/workflows-reference/package-intunewin.yml`) must be copied into a **private** repository that the app dispatches to, so tenant IDs stay out of public workflow logs. See the [Self-Hosting Guide](docs/SELF_HOSTING.md) for the full set of settings.
 
-[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/ugurkocde/IntuneGet)
-
-See the [Self-Hosting Guide](docs/SELF_HOSTING.md) for detailed instructions.
+The sections below are upstream's documentation and describe the upstream project.
 
 ---
 
@@ -299,13 +289,11 @@ See [SECURITY.md](SECURITY.md) for our complete security policy.
 
 ## Contributing
 
-Contributions are welcome. Please read [CONTRIBUTING.md](CONTRIBUTING.md) before submitting a pull request.
+Changes that are useful beyond this fork should go to the upstream project: see [ugurkocde/IntuneGet](https://github.com/ugurkocde/IntuneGet) and its [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 
-This project is licensed under the [GNU Affero General Public License v3.0 (AGPL-3.0)](LICENSE).
-
-This license applies to all code in this repository, regardless of when it was committed.
+Licensed under the [GNU Affero General Public License v3.0 (AGPL-3.0)](LICENSE), the same as upstream. The original work is copyright its authors; this fork's changes are released under the same licence.
 
 - Self-host for internal business use
 - Modify for personal or internal use
@@ -315,12 +303,6 @@ This license applies to all code in this repository, regardless of when it was c
 
 <div align="center">
 
-**Simplify your Intune deployments.**
-
-[![Get Started](https://img.shields.io/badge/Get_Started-intuneget.com-2563eb?style=for-the-badge)](https://intuneget.com)
-[![Documentation](https://img.shields.io/badge/Documentation-Self--Hosting-555555?style=for-the-badge)](docs/SELF_HOSTING.md)
-[![Report Issue](https://img.shields.io/badge/Report-Issue-d73a49?style=for-the-badge)](https://github.com/ugurkocde/IntuneGet/issues)
-
-[![Star on GitHub](https://img.shields.io/github/stars/ugurkocde/IntuneGet?style=social)](https://github.com/ugurkocde/IntuneGet/stargazers)
+Based on **[IntuneGet](https://github.com/ugurkocde/IntuneGet)** by Ugur Koc and contributors.
 
 </div>
