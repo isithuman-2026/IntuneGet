@@ -104,6 +104,42 @@ async function verifyTokenWithGraph(accessToken: string): Promise<TokenUserInfo 
  * Results are cached to minimise latency on hot paths.
  */
 export async function parseAccessToken(authHeader: string | null): Promise<TokenUserInfo | null> {
+  const info = await verifyTokenIdentity(authHeader);
+  // Checked after the cache so a token cached before the allowlist changed is still rejected.
+  if (!info || !isTenantAllowed(info.tenantId)) {
+    return null;
+  }
+  return info;
+}
+
+let _warnedNoAllowlist = false;
+
+/**
+ * True when tenantId is in ALLOWED_TENANT_IDS (comma-separated, case-insensitive).
+ * Unset or empty allows every tenant.
+ */
+export function isTenantAllowed(
+  tenantId: string,
+  allowList: string | undefined = process.env.ALLOWED_TENANT_IDS
+): boolean {
+  const allowed = (allowList ?? '')
+    .split(',')
+    .map((id) => id.trim().toLowerCase())
+    .filter(Boolean);
+  if (allowed.length === 0) {
+    if (!_warnedNoAllowlist) {
+      _warnedNoAllowlist = true;
+      console.warn('ALLOWED_TENANT_IDS is not set: any Entra tenant can use this app.');
+    }
+    return true;
+  }
+  return allowed.includes(tenantId.trim().toLowerCase());
+}
+
+/**
+ * Verify the token's identity with Microsoft Graph, without the tenant allowlist.
+ */
+export async function verifyTokenIdentity(authHeader: string | null): Promise<TokenUserInfo | null> {
   if (!authHeader?.startsWith('Bearer ')) {
     return null;
   }
