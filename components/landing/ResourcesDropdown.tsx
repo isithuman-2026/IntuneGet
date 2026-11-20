@@ -17,7 +17,7 @@ const resourceLinks = [
     icon: Tag,
   },
   {
-    href: "/#faq",
+    href: "/overview#faq",
     label: "FAQ",
     description: "Common questions answered",
     icon: CircleHelp,

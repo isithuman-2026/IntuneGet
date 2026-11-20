@@ -29,18 +29,13 @@ const AuthedAvatar = dynamic(
   }
 );
 
-const primaryNavLinks = [
-  { href: "/apps", label: "Apps" },
-  { href: "/qa", label: "Live Packaging", isLive: true },
-  { href: "/#how-it-works", label: "How It Works" },
+const primaryNavLinks: { href: string; label: string; isLive?: boolean }[] = [
+  { href: "/overview#how-it-works", label: "How It Works" },
   { href: "/security", label: "Security" },
 ];
 
 const secondaryNavLinks = [
-  { href: "/pricing", label: "Pricing" },
-  { href: "/#faq", label: "FAQ" },
-  { href: "/blog", label: "Blog" },
-  { href: "/changelog", label: "Changelog" },
+  { href: "/overview#faq", label: "FAQ" },
 ];
 
 export function Header() {

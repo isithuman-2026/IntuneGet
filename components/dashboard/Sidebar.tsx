@@ -24,6 +24,7 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   History,
+  BookOpen,
 } from 'lucide-react';
 import { T } from 'gt-next';
 import { cn } from '@/lib/utils';
@@ -66,6 +67,7 @@ const managementNav: NavItem[] = [
 const analyticsNav: NavItem[] = [
   { name: 'Reports', href: '/dashboard/reports', icon: BarChart3 },
   { name: 'App Requests', href: '/dashboard/app-requests', icon: Lightbulb },
+  { name: 'Docs', href: '/docs', icon: BookOpen },
 ];
 
 const mspNav: NavItem[] = [

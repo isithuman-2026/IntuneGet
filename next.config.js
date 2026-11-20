@@ -9,6 +9,8 @@ if (process.env.NODE_ENV === "production") {
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  // Only the version string reaches the client, not the whole package.json.
+  env: { NEXT_PUBLIC_APP_VERSION: require("./package.json").version },
   output: "standalone",
   images: {
     remotePatterns: [

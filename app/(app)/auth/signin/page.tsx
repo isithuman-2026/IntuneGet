@@ -15,7 +15,6 @@ import { trackSigninClick } from '@/hooks/useLandingStats';
 import { AuthShell } from '@/components/auth/AuthShell';
 import { NotAuthorised } from '@/components/auth/NotAuthorised';
 import { isNotAssignedError } from '@/lib/msal-errors';
-import { version } from '../../../../package.json';
 import {
   getSafeInternalRedirect,
   rememberPostAuthRedirect,
@@ -247,7 +246,7 @@ function SignInContent() {
         <Link href="/about" className="hover:text-[#0e7490]">
           About
         </Link>
-        <span>v{version}</span>
+        <span>v{process.env.NEXT_PUBLIC_APP_VERSION}</span>
       </div>
     </AuthShell>
   );

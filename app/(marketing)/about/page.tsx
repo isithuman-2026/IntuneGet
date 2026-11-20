@@ -93,6 +93,16 @@ export default function AboutPage() {
       />
 
       <main className="flex-1 mx-auto max-w-4xl px-4 py-12 lg:px-8 lg:py-16 pt-24 lg:pt-28 w-full">
+        <section className="mb-12 rounded-xl border border-overlay/[0.08] bg-bg-elevated p-6 text-sm text-text-secondary">
+          <p className="font-medium text-text-primary">Self-hosted fork of IntuneGet by Ugur Koc.</p>
+          <ul className="mt-3 flex flex-wrap gap-x-5 gap-y-2">
+            <li><a className="text-accent-cyan hover:underline" href="https://github.com/ugurkocde/IntuneGet">Upstream project</a></li>
+            <li><a className="text-accent-cyan hover:underline" href="https://github.com/isithuman-2026/IntuneGet">This fork&apos;s source</a></li>
+            <li><a className="text-accent-cyan hover:underline" href="https://github.com/isithuman-2026/IntuneGet/blob/main/LICENSE">Licence: AGPL-3.0</a></li>
+            <li><Link className="text-accent-cyan hover:underline" href="/overview">Product overview</Link></li>
+            <li>Version {process.env.NEXT_PUBLIC_APP_VERSION}</li>
+          </ul>
+        </section>
         {/* Hero */}
         <div className="text-center mb-16">
           <span className="inline-block font-mono text-xs tracking-wider text-accent-cyan uppercase mb-4">

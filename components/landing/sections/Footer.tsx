@@ -42,8 +42,8 @@ const footerGroups: Array<{ title: string; links: FooterLink[] }> = [
     title: "Deploy",
     links: [
       { label: "App catalog", href: "/apps" },
-      { label: "How it works", href: "/#how-it-works" },
-      { label: "Get started", href: "/#get-started" },
+      { label: "How it works", href: "/overview#how-it-works" },
+      { label: "Get started", href: "/overview#get-started" },
     ],
   },
   {
