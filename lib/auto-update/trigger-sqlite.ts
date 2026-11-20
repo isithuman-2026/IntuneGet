@@ -11,6 +11,7 @@ import {
   sqliteAutoUpdateHistory,
   sqliteUserSettings,
   sqlitePendingAppPrune,
+  sqliteUploadHistory,
   type UpdateCheckInsert,
 } from '@/lib/db/sqlite';
 import { getDatabase } from '@/lib/db';
@@ -25,6 +26,8 @@ import {
 } from '@/types/update-policies';
 import { getLatestInstallerInfo, type TriggerResult, type UpdateInfo } from './trigger';
 import type { Json } from '@/types/database';
+import { getApp, getAppAssignments } from '@/lib/intune-api';
+import { pickAssignedSourceApp } from './source-app';
 
 /**
  * Caller-supplied installer tuple. When present, triggerAutoUpdate skips the
@@ -95,7 +98,20 @@ export class AutoUpdateTriggerSqlite {
     );
 
     const { carryOverAssignments, supersedePreviousApp } = await sqliteUserSettings.get(policy.user_id) ?? { carryOverAssignments: false, supersedePreviousApp: false };
-    const autoSupersede = supersedePreviousApp && Boolean(updateInfo.currentIntuneAppId);
+    // Carry over from (and supersede) the copy that actually holds the
+    // assignments, not blindly the newest tracked copy.
+    let sourceAppId = updateInfo.currentIntuneAppId;
+    if (carryOverAssignments && sourceAppId) {
+      const token = await getServicePrincipalToken(policy.tenant_id);
+      if (token) {
+        const candidates = await sqliteUploadHistory.listAppIdsForWinget(policy.tenant_id, policy.winget_id);
+        sourceAppId = await pickAssignedSourceApp(sourceAppId, candidates, async (appId) => {
+          if (!(await getApp(token, appId))) return null;
+          return (await getAppAssignments(token, appId)).length;
+        });
+      }
+    }
+    const autoSupersede = supersedePreviousApp && Boolean(sourceAppId);
 
     let jobId: string | undefined;
     try {
@@ -154,9 +170,9 @@ export class AutoUpdateTriggerSqlite {
       // Record a prune candidate for the old app now that a supersedence
       // attempt is committed. new_app_id is unknown until the packaging
       // workflow finishes; the prune job resolves it lazily via job_id.
-      if (autoSupersede && updateInfo.currentIntuneAppId) {
+      if (autoSupersede && sourceAppId) {
         await sqlitePendingAppPrune.create({
-          oldAppId: updateInfo.currentIntuneAppId,
+          oldAppId: sourceAppId,
           jobId: job.id,
           tenantId: policy.tenant_id,
         });
@@ -186,7 +202,7 @@ export class AutoUpdateTriggerSqlite {
           forceCreate: deploymentConfig.forceCreateNewApp !== false,
           assignments: deploymentConfig.assignments ? JSON.stringify(deploymentConfig.assignments) : undefined,
           categories: deploymentConfig.categories ? JSON.stringify(deploymentConfig.categories) : undefined,
-          sourceIntuneAppId: updateInfo.currentIntuneAppId,
+          sourceIntuneAppId: sourceAppId,
           autoSupersede,
           supersedenceType: autoSupersede ? 'update' : undefined,
           carryOverAssignments,

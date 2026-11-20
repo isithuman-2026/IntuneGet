@@ -185,6 +185,10 @@ describe('AutoUpdateTriggerSqlite', () => {
     vi.doMock('@/lib/intune/graph-client', () => ({
       getServicePrincipalToken: vi.fn().mockResolvedValue('fake-token'),
     }));
+    vi.doMock('@/lib/intune-api', () => ({
+      getApp: vi.fn().mockResolvedValue({ id: 'x' }),
+      getAppAssignments: vi.fn().mockResolvedValue([{ intent: 'available' }]),
+    }));
     vi.doMock('@/lib/github-actions', () => ({
       isGitHubActionsConfigured: () => true,
       triggerPackagingWorkflow: vi.fn().mockResolvedValue({ success: true }),

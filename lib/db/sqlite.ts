@@ -1505,6 +1505,14 @@ export const sqliteUserSettings = {
  * Provides direct queries for edit/rollback decision gates.
  */
 export const sqliteUploadHistory = {
+  /** Intune app ids deployed for one winget app in a tenant, newest first. */
+  async listAppIdsForWinget(tenantId: string, wingetId: string): Promise<string[]> {
+    const rows = getDb()
+      .prepare('SELECT DISTINCT intune_app_id FROM upload_history WHERE intune_tenant_id = ? AND winget_id = ? AND intune_app_id IS NOT NULL ORDER BY deployed_at DESC')
+      .all(tenantId, wingetId) as { intune_app_id: string }[];
+    return rows.map((r) => r.intune_app_id);
+  },
+
   async getLatestByIntuneAppId(tenantId: string, intuneAppId: string): Promise<UploadHistoryRecord | null> {
     const database = getDb();
     const row = database
