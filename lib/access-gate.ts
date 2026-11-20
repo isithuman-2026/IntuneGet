@@ -15,6 +15,7 @@ export function decideGate(input: {
   if (input.accessStatus === 200) return 'allowed';
   // 403 must never become 'signin': a signed-in but disallowed user would loop.
   if (input.accessStatus === 403) return 'denied';
-  if (input.accessStatus === 401) return 'signin';
+  // 401 while MSAL is signed in: the sign-in page would send the user straight back here,
+  // so show the retry/sign-out screen instead of looping.
   return 'error';
 }

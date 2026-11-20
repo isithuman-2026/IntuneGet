@@ -22,8 +22,8 @@ describe('decideGate', () => {
   it('denies on 403 instead of redirecting to sign-in', () => {
     expect(decideGate({ ...base, accessStatus: 403 })).toBe('denied');
   });
-  it('sends 401 to sign-in', () => {
-    expect(decideGate({ ...base, accessStatus: 401 })).toBe('signin');
+  it('shows a retryable error on 401 while MSAL is signed in (sign-in page would bounce straight back)', () => {
+    expect(decideGate({ ...base, accessStatus: 401 })).toBe('error');
   });
   it('shows an error on 5xx', () => {
     expect(decideGate({ ...base, accessStatus: 500 })).toBe('error');
