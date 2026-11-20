@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import { AccessGate } from '@/components/auth/AccessGate';
 
 export const metadata: Metadata = {
   title: 'Setup | IntuneGet',
@@ -11,8 +12,10 @@ export default function OnboardingLayout({
   children: React.ReactNode;
 }) {
   return (
-    <div className="min-h-screen bg-bg-deepest">
-      {children}
-    </div>
+    <AccessGate>
+      <div className="min-h-screen bg-bg-deepest">
+        {children}
+      </div>
+    </AccessGate>
   );
 }

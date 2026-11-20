@@ -16,6 +16,7 @@ import { useCartStore } from '@/stores/cart-store';
 import { useSidebarStore } from '@/stores/sidebar-store';
 import { useProfileStore } from '@/stores/profile-store';
 import { useMicrosoftAuth } from '@/hooks/useMicrosoftAuth';
+import { AccessGate } from '@/components/auth/AccessGate';
 import { OnboardingStatusProvider, useOnboardingStatusContext } from '@/components/providers/OnboardingStatusProvider';
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
 import { TenantSwitcher } from '@/components/msp';
@@ -32,9 +33,11 @@ export default function DashboardLayout({
   children: React.ReactNode;
 }) {
   return (
-    <OnboardingStatusProvider>
-      <DashboardLayoutInner>{children}</DashboardLayoutInner>
-    </OnboardingStatusProvider>
+    <AccessGate>
+      <OnboardingStatusProvider>
+        <DashboardLayoutInner>{children}</DashboardLayoutInner>
+      </OnboardingStatusProvider>
+    </AccessGate>
   );
 }
 
@@ -75,12 +78,6 @@ function DashboardLayoutInner({
   useEffect(() => {
     setIsLoading(false);
   }, []);
-
-  useEffect(() => {
-    if (!isLoading && !isAuthenticated && !isSigningOut) {
-      router.push('/auth/signin?callbackUrl=/dashboard');
-    }
-  }, [isLoading, isAuthenticated, isSigningOut, router]);
 
   useEffect(() => {
     if (isLoading || !isAuthenticated || isCheckingOnboarding) return;

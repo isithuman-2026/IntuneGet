@@ -188,6 +188,24 @@ export function useMicrosoftAuth() {
   }, [instance]);
 
   /**
+   * Sign in again with the Microsoft account picker (switch account)
+   */
+  const signInSelectAccount = useCallback(async () => {
+    try {
+      const result = await instance.loginPopup({ scopes: graphScopes, prompt: 'select_account' });
+      if (result?.account) {
+        instance.setActiveAccount(result.account);
+        document.cookie = 'msal-auth-hint=1; path=/; SameSite=Lax; max-age=86400';
+        hasTrackedSignInRef.current = result.account.localAccountId;
+        await trackSignInToServer(result.account, 'popup');
+      }
+      return !!result;
+    } catch {
+      return false;
+    }
+  }, [instance]);
+
+  /**
    * Sign in with Microsoft redirect
    */
   const signInRedirect = useCallback(async () => {
@@ -274,6 +292,7 @@ export function useMicrosoftAuth() {
     isTokenExpiring,
     getTokenExpiryTime,
     signIn,
+    signInSelectAccount,
     signInRedirect,
     signOut,
     requestAdminConsent,
