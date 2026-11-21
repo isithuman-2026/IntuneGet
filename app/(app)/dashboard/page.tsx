@@ -22,16 +22,9 @@ import { AdminConsentBanner } from '@/components/AdminConsentBanner';
 import { FilterPermissionNudge } from '@/components/FilterPermissionNudge';
 import { useDashboardStats } from '@/hooks/useAnalytics';
 import { useOnboardingStatusContext } from '@/components/providers/OnboardingStatusProvider';
-import { RecentActivityList, PageHeader } from '@/components/dashboard';
+import { RecentActivityList } from '@/components/dashboard';
 import { useUserSettings } from '@/components/providers/UserSettingsProvider';
 import { T, Var } from 'gt-next';
-
-function getTimeBasedGreeting(): React.ReactNode {
-  const hour = new Date().getHours();
-  if (hour < 12) return <T>Good morning</T>;
-  if (hour < 17) return <T>Good afternoon</T>;
-  return <T>Good evening</T>;
-}
 
 export default function DashboardPage() {
   const { user } = useMicrosoftAuth();
@@ -39,11 +32,9 @@ export default function DashboardPage() {
   const { errorType } = useOnboardingStatusContext();
   const { settings, setQuickStartDismissed } = useUserSettings();
   const [mounted, setMounted] = useState(false);
-  const [greeting, setGreeting] = useState<React.ReactNode>(<T>Welcome back</T>);
 
   useEffect(() => {
     setMounted(true);
-    setGreeting(getTimeBasedGreeting());
   }, []);
 
   const handleDismissQuickStart = async () => {
@@ -95,14 +86,6 @@ export default function DashboardPage() {
 
   return (
     <div className="space-y-8">
-      {/* Welcome header using PageHeader */}
-      <PageHeader
-        title={<T><Var>{greeting}</Var>, <Var>{user?.name?.split(' ')[0] || 'User'}</Var></T>}
-        description={<T>Deploy Windows applications to Intune with precision and ease</T>}
-        gradient
-        gradientColors="cyan"
-      />
-
       {/* Admin consent banner */}
       <AdminConsentBanner />
 
