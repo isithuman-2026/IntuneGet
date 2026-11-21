@@ -72,9 +72,11 @@ export async function GET(request: NextRequest) {
     );
 
     const allJobs = (jobs || []) as PackagingJobAnalytics[];
+    // SQLite jobs finish as 'deployed'; Supabase-era rows used 'completed' (same rule as ./stats).
+    const isSuccess = (status: string) => status === 'deployed' || status === 'completed';
 
     // Calculate success rate
-    const completedJobs = allJobs.filter((j) => j.status === 'completed').length;
+    const completedJobs = allJobs.filter((j) => isSuccess(j.status)).length;
     const failedJobs = allJobs.filter((j) => j.status === 'failed').length;
     const totalFinished = completedJobs + failedJobs;
     const successRate = totalFinished > 0 ? Math.round((completedJobs / totalFinished) * 100) : 0;
@@ -98,7 +100,7 @@ export async function GET(request: NextRequest) {
 
       const existing = dailyMap.get(date);
       if (existing) {
-        if (job.status === 'completed') {
+        if (isSuccess(job.status)) {
           existing.completed++;
         } else if (job.status === 'failed') {
           existing.failed++;
@@ -118,7 +120,7 @@ export async function GET(request: NextRequest) {
     const appCounts = new Map<string, { displayName: string; publisher: string; count: number }>();
 
     allJobs
-      .filter((j) => j.status === 'completed')
+      .filter((j) => isSuccess(j.status))
       .forEach((job) => {
         const existing = appCounts.get(job.winget_id);
         if (existing) {
