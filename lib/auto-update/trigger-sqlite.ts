@@ -139,12 +139,23 @@ export class AutoUpdateTriggerSqlite {
           (policy.deployment_config as DeploymentConfig).installScope
         );
         if (!installerResolution.ok) {
+          const { reason, message } = installerResolution.failure;
+          // The update check can see a version before the catalog has synced its
+          // installer manifest. That is a wait, not a broken update: don't trip
+          // the circuit breaker, or the policy stops for good once it catches up.
+          if (reason === 'version_record_missing' || reason === 'installer_metadata_missing') {
+            await sqliteAutoUpdateHistory.updateStatus(historyId, 'cancelled', {
+              errorMessage: message,
+              completedAt: new Date().toISOString(),
+            });
+            return { success: false, skipped: true, skipReason: message, historyId };
+          }
           await sqliteUpdatePolicies.incrementFailureCount(policy.id);
           await sqliteAutoUpdateHistory.updateStatus(historyId, 'failed', {
-            errorMessage: installerResolution.failure.message,
+            errorMessage: message,
             completedAt: new Date().toISOString(),
           });
-          return { success: false, error: installerResolution.failure.message, historyId };
+          return { success: false, error: message, historyId };
         }
         installerInfo = { ...installerResolution.info, currentVersion: updateInfo.currentVersion };
       }

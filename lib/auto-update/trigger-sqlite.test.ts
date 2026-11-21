@@ -320,4 +320,55 @@ describe('AutoUpdateTriggerSqlite', () => {
       })
     );
   });
+
+  async function runWithResolutionFailure(reason: string, message: string) {
+    vi.doMock('@/lib/intune/graph-client', () => ({
+      getServicePrincipalToken: vi.fn().mockResolvedValue('fake-token'),
+    }));
+    vi.doMock('./trigger', async (importOriginal) => {
+      const actual = await importOriginal<typeof import('./trigger')>();
+      return {
+        ...actual,
+        getLatestInstallerInfo: vi.fn().mockResolvedValue({ ok: false, failure: { reason, message } }),
+      };
+    });
+
+    const { sqliteDb, sqliteUpdatePolicies } = await import('../db/sqlite');
+    const job = await sqliteDb.jobs.create({
+      user_id: 'user-1', winget_id: '7zip.7zip', version: '22.0', display_name: '7-Zip',
+      installer_type: 'exe', installer_url: 'https://x', install_command: 'x', uninstall_command: 'x',
+      install_scope: 'machine', status: 'deployed',
+    });
+    const { policy } = await sqliteUpdatePolicies.upsert('user-1', {
+      winget_id: '7zip.7zip', tenant_id: 'tenant-1', policy_type: 'auto_update',
+      original_upload_history_id: job.id,
+      deployment_config: { displayName: '7-Zip', publisher: '7-Zip', architecture: 'x64', installerType: 'exe', installCommand: 'x', uninstallCommand: 'x', installScope: 'machine', detectionRules: [] },
+    });
+
+    const { AutoUpdateTriggerSqlite } = await import('./trigger-sqlite');
+    const result = await new AutoUpdateTriggerSqlite().triggerAutoUpdate(policy, {
+      wingetId: '7zip.7zip', currentVersion: '22.0', latestVersion: '23.0',
+      displayName: '7-Zip', installerUrl: 'https://x', installerSha256: 'a'.repeat(64), installerType: 'exe',
+    });
+    const after = await sqliteUpdatePolicies.getById(policy.id, 'user-1');
+    return { result, failures: after?.consecutive_failures };
+  }
+
+  it.each(['version_record_missing', 'installer_metadata_missing'])(
+    'waits for the catalog (%s) without counting toward the circuit breaker',
+    async (reason) => {
+      const { result, failures } = await runWithResolutionFailure(reason, 'catalog not synced yet');
+      expect(result.success).toBe(false);
+      expect(result.skipped).toBe(true);
+      expect(result.skipReason).toMatch(/catalog not synced yet/);
+      expect(failures).toBe(0);
+    }
+  );
+
+  it('still counts a real installer resolution failure toward the circuit breaker', async () => {
+    const { result, failures } = await runWithResolutionFailure('no_compatible_installer', 'no x64 installer');
+    expect(result.skipped).toBeFalsy();
+    expect(result.error).toMatch(/no x64 installer/);
+    expect(failures).toBe(1);
+  });
 });
