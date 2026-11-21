@@ -931,7 +931,9 @@ export const sqliteUpdatePolicies = {
         .prepare(`
           UPDATE app_update_policies
           SET policy_type = ?, pinned_version = ?, deployment_config = ?,
-              original_upload_history_id = ?, delay_days = ?, is_enabled = ?, updated_at = ?
+              original_upload_history_id = ?, delay_days = ?, is_enabled = ?, updated_at = ?,
+              -- Saving auto-update is how a user resumes a policy the circuit breaker paused.
+              consecutive_failures = CASE WHEN ? = 'auto_update' THEN 0 ELSE consecutive_failures END
           WHERE id = ?
         `)
         .run(
@@ -951,6 +953,7 @@ export const sqliteUpdatePolicies = {
           input.delay_days ?? existing.delay_days ?? 0,
           input.is_enabled ?? true ? 1 : 0,
           now,
+          input.policy_type,
           existing.id
         );
       return { policy: (await this.getById(existing.id, userId)) as AppUpdatePolicy, created: false };

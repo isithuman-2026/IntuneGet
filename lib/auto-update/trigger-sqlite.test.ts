@@ -371,4 +371,26 @@ describe('AutoUpdateTriggerSqlite', () => {
     expect(result.error).toMatch(/no x64 installer/);
     expect(failures).toBe(1);
   });
+
+  it('choosing auto-update again resumes a policy the circuit breaker paused', async () => {
+    const { sqliteUpdatePolicies } = await import('../db/sqlite');
+    const input = {
+      winget_id: '7zip.7zip', tenant_id: 'tenant-1', policy_type: 'auto_update' as const,
+      deployment_config: { displayName: '7-Zip', publisher: '7-Zip', architecture: 'x64', installerType: 'exe', installCommand: 'x', uninstallCommand: 'x', installScope: 'machine', detectionRules: [] },
+    };
+    const { policy } = await sqliteUpdatePolicies.upsert('user-1', input);
+    for (let i = 0; i < 3; i++) await sqliteUpdatePolicies.incrementFailureCount(policy.id);
+    expect((await sqliteUpdatePolicies.getById(policy.id, 'user-1'))?.consecutive_failures).toBe(3);
+
+    await sqliteUpdatePolicies.upsert('user-1', { winget_id: input.winget_id, tenant_id: input.tenant_id, policy_type: 'auto_update' });
+    expect((await sqliteUpdatePolicies.getById(policy.id, 'user-1'))?.consecutive_failures).toBe(0);
+  });
+
+  it('switching a paused policy to notify-only keeps its failure count', async () => {
+    const { sqliteUpdatePolicies } = await import('../db/sqlite');
+    const { policy } = await sqliteUpdatePolicies.upsert('user-1', { winget_id: 'a.b', tenant_id: 'tenant-1', policy_type: 'auto_update' });
+    await sqliteUpdatePolicies.incrementFailureCount(policy.id);
+    await sqliteUpdatePolicies.upsert('user-1', { winget_id: 'a.b', tenant_id: 'tenant-1', policy_type: 'notify' });
+    expect((await sqliteUpdatePolicies.getById(policy.id, 'user-1'))?.consecutive_failures).toBe(1);
+  });
 });

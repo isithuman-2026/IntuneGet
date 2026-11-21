@@ -15,6 +15,7 @@ import {
   Zap,
   Plus,
   ShieldOff,
+  PauseCircle,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { AppIcon } from '@/components/AppIcon';
@@ -96,6 +97,8 @@ export function UpdateCard({
   const isAutoUpdateEnabled =
     policyStatus?.policy_type === 'auto_update' && policyStatus?.is_enabled;
   const hasFailures = (policyStatus?.consecutive_failures || 0) > 0;
+  // Enabled auto-update that the circuit breaker has stopped (same limit as canAutoUpdate).
+  const isAutoUpdatePaused = isAutoUpdateEnabled && (policyStatus?.consecutive_failures ?? 0) >= 3;
   const updateType = classifyUpdateType(update.current_version, update.latest_version);
   const typeConfig = updateTypeConfig[updateType];
   const PolicyIcon = policyStatus?.policy_type ? policyIcons[policyStatus.policy_type] : null;
@@ -226,10 +229,19 @@ export function UpdateCard({
               <T>New to IntuneGet</T>
             </span>
           )}
-          {isAutoUpdateEnabled && (
+          {isAutoUpdateEnabled && !isAutoUpdatePaused && (
             <span className="flex items-center gap-1 text-[11px] font-medium text-status-success">
               <Zap className="w-3 h-3" />
               <T>Auto-update</T>
+            </span>
+          )}
+          {isAutoUpdatePaused && (
+            <span
+              className="flex items-center gap-1 text-[11px] font-medium text-status-warning"
+              title="Paused after repeated failures. Choose Auto-update in the policy menu to resume."
+            >
+              <PauseCircle className="w-3 h-3" />
+              <T>Auto-update paused</T>
             </span>
           )}
           {hasFailures && (
